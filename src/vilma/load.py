@@ -6,7 +6,8 @@ import pandas as pd
 import logging
 import sys
 from tempfile import TemporaryFile
-import matrix
+from matrix_structures import LowRankMatrix
+from matrix_structures import BlockDiagonalMatrix
 import h5py
 
 
@@ -161,7 +162,9 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap):
                 # )
                 # raw_mats.append(ld_matrix)
                 # svds.append(matrix.SVD(accepted_matrix, 42))
-                svds.append(matrix.SVD(accepted_matrix, t, hdf_file=hdf_file))
+                svds.append(
+                    LowRankMatrix(accepted_matrix, t, hdf_file=hdf_file)
+                )
                 # us.append(u)
                 # ss.append(s)
                 # vs.append(v)
@@ -188,7 +191,7 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap):
     assert len(perm) == variants.shape[0]
     assert len(perm) == len(set(perm))
     perm = np.array(perm)
-    bm = matrix.BlockMatrix(svds, perm=perm, missing=missing)
+    bm = BlockDiagonalMatrix(svds, perm=perm, missing=missing)
     # bm = matrix.BlockMatrix([matrix.SVD(u, s, v)
     #                          for u, s, v in zip(*(us, ss, vs))],
     #                         perm=perm)
