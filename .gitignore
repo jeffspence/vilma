@@ -1,2 +1,5 @@
-code/*.pyc
-code/*.swp
+src/vilma/*.pyc
+src/vilma/*.swp
+tests/*.swp
+tests/__pycache*
+*.swp
