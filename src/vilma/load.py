@@ -1,29 +1,38 @@
-from __future__ import print_function
+"""
+Utilities for loading and manipulating GWAS summary stats and LD.
+
+functions:
+    load_variant_list: Read in a list of variants to use for analysis
+    load_annotations: Read an annotation file and merge with variants
+    load_sumstats: Load GWAS summary stats and merge with variants
+    load_ld_from_schema: Load a block LD matrix using a schema file
+        and match to variants
+"""
+
 from __future__ import division
 
 import numpy as np
 import pandas as pd
 import logging
 import sys
+import h5py
 from tempfile import TemporaryFile
 from matrix_structures import LowRankMatrix
 from matrix_structures import BlockDiagonalMatrix
-import h5py
 
 
 logger = logging.getLogger()
-
 handler = logging.StreamHandler(sys.stdout)
 logger.addHandler(handler)
 
 
 def load_variant_list(variant_path):
-    """Read in a list of variants to use for analysis."""
+    """Read in a list of variants from `variant_path`"""
     return pd.read_table(variant_path).drop_duplicates()
 
 
-def load_annotations(annotations_file, variants):
-    """Read annotation file. Just make 1s for now."""
+def load_annotations(annotations_file, variants, denylist):
+    """Read `annotations_file`  and match annotations to `variants`"""
     if annotations_file is None:
         return np.ones((variants.shape[0], 1))
     df = pd.read_table(annotations_file)
@@ -32,6 +41,8 @@ def load_annotations(annotations_file, variants):
     logging.info('%d out of %d total variants are missing annotations',
                  df['ANNOTATION'].isna().sum(),
                  df.shape[0])
+    # TODO: change this so that variants that do not have an annotation
+    # get added to the denylist
     df.loc[df['ANNOTATION'].isna(), 'ANNOTATION'] = np.random.choice(
         np.nanmax(df['ANNOTATION'].values)+1,
         size=df['ANNOTATION'].isna().sum()
@@ -41,6 +52,7 @@ def load_annotations(annotations_file, variants):
 
 
 def load_sumstats(sumstats_path, variants):
+    """Load summary stats from `sumstats_path` and match to `variants`"""
     sumstats = pd.read_table(sumstats_path)
     sumstats = pd.merge(variants, sumstats, on='ID', how='left')
     if 'BETA' not in sumstats.columns:
@@ -62,11 +74,26 @@ def load_sumstats(sumstats_path, variants):
     return sumstats, np.where(missing)[0]
 
 
-def load_ld_from_schema(schema_path, variants, denylist, t, mmap):
-    """Load block matrix using specified schema, and filter to variants.
+def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
+    """
+    Load block matrix using specified schema, and filter to variants.
 
-    Schema format:
-        SNPMetadataPath<tab>LDPanelMatrix
+    args:
+        schema_path: path to file containing the schema manifest
+        variants: the set of variants at which we want LD
+        denylist: Variants which should be treated as missing for the purposes
+            of this LD matrix.
+        t: LD threshold for low rank approximations to the LD matrix. A
+            threshold of t guarantees that SNPs with r^2 lower than t
+            will be linearly independent.
+        mmap: Boolean to indicate whether to store LD matrix on disk (may be
+            slow).  Defaults to storing LD matrix in memory (faster but more
+            memory intensive).
+
+    returns:
+        A vilma.matrix_structures.BlockDiagonalMatrix containing the LD matrix
+        ordered in the order of `variants`.
+
     """
 
     svds = []
@@ -148,27 +175,9 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap):
                 assert accepted_matrix.shape == (np.sum(variant_indices),
                                                  np.sum(variant_indices))
 
-                # if accepted_matrix.shape[0] > 42:
-                #     u, s, v = svds(accepted_matrix, 42)
-                # else:
-                #     u, s, v = np.linalg.svd(accepted_matrix)
-
-                # assert len(u.shape) == 2
-                # assert len(s.shape) == 1
-                # assert len(v.shape) == 2
-                # assert u.shape[0] == np.sum(variant_indices), (
-                #     schema_path, np.sum(variant_indices),
-                #     u.shape, s.shape, v.shape
-                # )
-                # raw_mats.append(ld_matrix)
-                # svds.append(matrix.SVD(accepted_matrix, 42))
                 svds.append(
                     LowRankMatrix(accepted_matrix, t, hdf_file=hdf_file)
                 )
-                # us.append(u)
-                # ss.append(s)
-                # vs.append(v)
-                # ld_mats.append(accepted_matrix)
 
     # Need to add in variants that are not in the LD matrix
     # Set them to have massive variance
@@ -192,9 +201,5 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap):
     assert len(perm) == len(set(perm))
     perm = np.array(perm)
     bm = BlockDiagonalMatrix(svds, perm=perm, missing=missing)
-    # bm = matrix.BlockMatrix([matrix.SVD(u, s, v)
-    #                          for u, s, v in zip(*(us, ss, vs))],
-    #                         perm=perm)
-    # bm.raw_mats = raw_mats
 
     return bm
