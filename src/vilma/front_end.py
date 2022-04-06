@@ -93,7 +93,8 @@ def _main():
     variants = load.load_variant_list(args.extract)
 
     logger.info('Loading annotations...')
-    annotations = load.load_annotations(args.annotations, variants=variants)
+    annotations, denylist = load.load_annotations(args.annotations,
+                                                  variants=variants)
 
     combined_ld = []
     combined_betas = []
@@ -142,6 +143,7 @@ def _main():
             logger.info('Loading sumstats for population %d...' % (idx+1))
             sumstats, missing = load.load_sumstats(sumstats_path,
                                                    variants=variants)
+            missing.extend(denylist)
             combined_betas.append(np.array(sumstats.BETA).reshape((1, -1)))
             logger.info('Largest beta is... %f',
                         np.max(np.abs(np.array(sumstats.BETA))))

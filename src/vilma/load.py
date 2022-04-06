@@ -31,7 +31,7 @@ def load_variant_list(variant_path):
     return pd.read_table(variant_path).drop_duplicates()
 
 
-def load_annotations(annotations_file, variants, denylist):
+def load_annotations(annotations_file, variants):
     """Read `annotations_file`  and match annotations to `variants`"""
     if annotations_file is None:
         return np.ones((variants.shape[0], 1))
@@ -41,14 +41,11 @@ def load_annotations(annotations_file, variants, denylist):
     logging.info('%d out of %d total variants are missing annotations',
                  df['ANNOTATION'].isna().sum(),
                  df.shape[0])
-    # TODO: change this so that variants that do not have an annotation
-    # get added to the denylist
-    df.loc[df['ANNOTATION'].isna(), 'ANNOTATION'] = np.random.choice(
-        np.nanmax(df['ANNOTATION'].values)+1,
-        size=df['ANNOTATION'].isna().sum()
-    )
+
+    denylist = np.where(df['ANNOTATION'].isna())[0].tolist()
+    df.loc[df['ANNOTATION'].isna(), 'ANNOTATION'] = 0
     return pd.get_dummies(df['ANNOTATION'],
-                          dummy_na=False).to_numpy()
+                          dummy_na=False).to_numpy(), denylist
 
 
 def load_sumstats(sumstats_path, variants):
@@ -71,7 +68,7 @@ def load_sumstats(sumstats_path, variants):
     sumstats.loc[missing, 'BETA'] = 0.
     sumstats.loc[missing, 'SE'] = 1.
     sumstats.loc[~stay_allele, 'BETA'] = -sumstats.loc[~stay_allele, 'BETA']
-    return sumstats, np.where(missing)[0]
+    return sumstats, np.where(missing)[0].tolist()
 
 
 def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
