@@ -191,32 +191,267 @@ def test_LowRankMatrix_get_rank():
 
 
 def test_BlockDiagonalMatrix_init():
-    pass
+    x1 = np.random.random((5, 5))
+    x1 = x1 + x1.T + 3 * np.eye(5)
+    m1 = mat_structs.LowRankMatrix(X=x1, t=1.)
+    x2 = np.random.random((3, 3))
+    x2 = x2 + x2.T + 3 * np.eye(3)
+    m2 = mat_structs.LowRankMatrix(X=x2, t=1.)
+    full_x = np.zeros((8, 8))
+    full_x[0:5, 0:5] = x1
+    full_x[5:8, 5:8] = x2
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
+
+    assert np.allclose(m.perm, np.arange(8))
+    assert np.allclose(m.inv_perm, np.arange(8))
+    assert m.shape == (8, 8)
+    assert m.missing.shape[0] == 0
+    assert len(m.matrices) == 2
+    assert m.matrices[0].shape == (5, 5)
+    assert m.matrices[1].shape == (3, 3)
+    assert np.allclose(m.starts, np.array([0., 5., 8.]))
+
+    my_perm = np.random.permutation(np.arange(8))
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2],
+                                        perm=my_perm)
+    assert np.allclose(m.perm, my_perm)
+    v = np.random.random(8)
+    assert np.allclose(v[m.perm][m.inv_perm], v)
+
+    with raises(ValueError):
+        mat_structs.BlockDiagonalMatrix(
+            [m1, np.eye(3)]
+        )
+
+    with raises(ValueError):
+        mat_structs.BlockDiagonalMatrix(
+            [m1, m2], perm=np.arange(100)
+        )
+
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2],
+                                        missing=np.arange(8, 100))
+    assert len(m.matrices) == 2
+    assert m.shape == (100, 100)
+    assert m.missing.shape[0] == 92
 
 
 def test_BlockDiagonalMatrix_dot_i():
-    pass
+    x1 = np.random.random((5, 5))
+    x1 = x1 + x1.T + 3 * np.eye(5)
+    m1 = mat_structs.LowRankMatrix(X=x1, t=1.)
+    x2 = np.random.random((3, 3))
+    x2 = x2 + x2.T + 3 * np.eye(3)
+    m2 = mat_structs.LowRankMatrix(X=x2, t=1.)
+    full_x = np.zeros((8, 8))
+    full_x[0:5, 0:5] = x1
+    full_x[5:8, 5:8] = x2
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
+    v = np.random.random(8)
+    for i in range(8):
+        assert np.isclose(full_x.dot(v)[i], m.dot_i(v, i))
+
+    my_perm = np.random.permutation(np.arange(8))
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2],
+                                        perm=my_perm)
+    res = full_x.dot(v[my_perm])[np.argsort(my_perm)]
+    for i in range(8):
+        assert np.isclose(res[i], m.dot_i(v, i))
 
 
 def test_BlockDiagonalMatrix_ridge_inverse_dot():
-    pass
+    x1 = np.random.random((5, 5))
+    x1 = x1 + x1.T + 3 * np.eye(5)
+    m1 = mat_structs.LowRankMatrix(X=x1, t=1.)
+    x2 = np.random.random((3, 3))
+    x2 = x2 + x2.T + 3 * np.eye(3)
+    m2 = mat_structs.LowRankMatrix(X=x2, t=1.)
+    full_x = np.zeros((8, 8))
+    full_x[0:5, 0:5] = x1
+    full_x[5:8, 5:8] = x2
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
+
+    v = np.random.random(8)
+    r = np.random.random() + 0.1
+    assert np.allclose(
+        np.linalg.inv(full_x + np.eye(8)*r).dot(v),
+        m.ridge_inverse_dot(v, r)
+    )
+
+    r = np.random.random(8)
+    assert np.allclose(
+        np.linalg.inv(full_x + np.diag(r)).dot(v),
+        m.ridge_inverse_dot(v, r)
+    )
+
+    my_perm = np.random.permutation(np.arange(8))
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2],
+                                        perm=my_perm)
+    assert np.allclose(
+        (np.linalg.inv(
+            full_x + np.diag(r[my_perm])
+        ).dot(v[my_perm]))[np.argsort(my_perm)],
+        m.ridge_inverse_dot(v, r)
+    )
+
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2],
+                                        missing=np.arange(8, 100))
+
+    v_full = np.zeros(100)
+    v_full[0:8] = v
+    r_full = np.random.random(100)
+    r_full[0:8] = r
+    assert np.allclose(
+        np.linalg.inv(full_x + np.diag(r)).dot(v),
+        m.ridge_inverse_dot(v_full, r_full)[0:8]
+    )
+    assert np.allclose(
+        m.ridge_inverse_dot(v_full, r_full)[8:], 0.
+    )
 
 
 def test_BlockDiagonalMatrix_dot():
-    pass
+    x1 = np.random.random((5, 5))
+    x1 = x1 + x1.T + 3 * np.eye(5)
+    m1 = mat_structs.LowRankMatrix(X=x1, t=1.)
+    x2 = np.random.random((3, 3))
+    x2 = x2 + x2.T + 3 * np.eye(3)
+    m2 = mat_structs.LowRankMatrix(X=x2, t=1.)
+    full_x = np.zeros((8, 8))
+    full_x[0:5, 0:5] = x1
+    full_x[5:8, 5:8] = x2
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
+
+    v = np.random.random(8)
+    assert np.allclose(
+        full_x.dot(v), m.dot(v)
+    )
+
+    my_perm = np.random.permutation(np.arange(8))
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2],
+                                        perm=my_perm)
+    assert np.allclose(
+        full_x.dot(v[my_perm])[np.argsort(my_perm)],
+        m.dot(v)
+    )
+
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2],
+                                        missing=np.arange(8, 100))
+    v_full = np.zeros(100)
+    v_full[0:8] = v
+    assert np.allclose(
+        full_x.dot(v),
+        m.dot(v_full)[0:8]
+    )
+    assert np.allclose(m.dot(v_full)[8:], 0)
 
 
 def test_BlockDiagonalMatrix_pow():
-    pass
+    x1 = np.random.random((5, 5))
+    x1 = x1 + x1.T + 3 * np.eye(5)
+    m1 = mat_structs.LowRankMatrix(X=x1, t=1.)
+    x2 = np.random.random((3, 3))
+    x2 = x2 + x2.T + 3 * np.eye(3)
+    m2 = mat_structs.LowRankMatrix(X=x2, t=1.)
+    full_x = np.zeros((8, 8))
+    full_x[0:5, 0:5] = x1
+    full_x[5:8, 5:8] = x2
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
+
+    v = np.random.random(8)
+    assert np.allclose(full_x.dot(full_x.dot(v)), (m**2).dot(v))
 
 
 def test_BlockDiagonalMatrix_inverse():
-    pass
+    x1 = np.random.random((5, 5))
+    x1 = x1 + x1.T + 3 * np.eye(5)
+    m1 = mat_structs.LowRankMatrix(X=x1, t=1.)
+    x2 = np.random.random((3, 3))
+    x2 = x2 + x2.T + 3 * np.eye(3)
+    m2 = mat_structs.LowRankMatrix(X=x2, t=1.)
+    full_x = np.zeros((8, 8))
+    full_x[0:5, 0:5] = x1
+    full_x[5:8, 5:8] = x2
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
+    v = np.random.random(8)
+    assert np.allclose(
+        np.linalg.inv(full_x).dot(v),
+        m.inverse.dot(v)
+    )
+
+    with raises(NotImplementedError):
+        m.inverse.dot_i(v, 2)
+
+    with raises(NotImplementedError):
+        m.inverse.ridge_inverse_dot(v, 1.)
+
+    assert np.allclose(
+        np.linalg.inv(full_x.dot(full_x)).dot(v),
+        (m.inverse ** 2).dot(v)
+    )
+
+    with raises(NotImplementedError):
+        m.inverse.diag()
 
 
 def test_BlockDiagonalMatrix_diag():
-    pass
+    x1 = np.random.random((5, 5))
+    x1 = x1 + x1.T + 3 * np.eye(5)
+    m1 = mat_structs.LowRankMatrix(X=x1, t=1.)
+    x2 = np.random.random((3, 3))
+    x2 = x2 + x2.T + 3 * np.eye(3)
+    m2 = mat_structs.LowRankMatrix(X=x2, t=1.)
+    full_x = np.zeros((8, 8))
+    full_x[0:5, 0:5] = x1
+    full_x[5:8, 5:8] = x2
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
+
+    assert np.allclose(
+        np.diag(full_x),
+        m.diag()
+    )
+
+    my_perm = np.random.permutation(np.arange(8))
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2],
+                                        perm=my_perm)
+    v = np.random.random(8)
+    assert np.isclose(
+        np.diag(full_x).dot(v[my_perm]),
+        m.diag().dot(v)
+    )
+
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2],
+                                        missing=np.arange(8, 100))
+    assert np.allclose(
+        m.diag()[0:8], np.diag(full_x)
+    )
+    assert np.allclose(
+        m.diag()[8:], 0
+    )
 
 
-def test_BlockDiagonalMatrix_rank():
-    pass
+def test_BlockDiagonalMatrix_get_rank():
+    x1 = np.random.random((5, 5))
+    x1 = x1 + x1.T + 3 * np.eye(5)
+    m1 = mat_structs.LowRankMatrix(X=x1, t=1.)
+    x2 = np.random.random((3, 3))
+    x2 = x2 + x2.T + 3 * np.eye(3)
+    m2 = mat_structs.LowRankMatrix(X=x2, t=1.)
+    full_x = np.zeros((8, 8))
+    full_x[0:5, 0:5] = x1
+    full_x[5:8, 5:8] = x2
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
+    assert m.get_rank() == 8
+    my_perm = np.random.permutation(np.arange(8))
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2],
+                                        perm=my_perm)
+    assert m.get_rank() == 8
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2],
+                                        missing=np.arange(8, 100))
+    assert m.get_rank() == 8
+
+    x1 = np.eye(5)
+    x1[0, 0] = 0
+    x1[1, 1] = 0
+    m1 = mat_structs.LowRankMatrix(X=x1, t=0.5)
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
+    assert m.get_rank() == 6

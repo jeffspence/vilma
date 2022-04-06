@@ -238,7 +238,8 @@ class BlockDiagonalMatrix(object):
     Fields:
         matrices: a list of the component matrices along the diagonal
         starts: a numpy array of length equal to the number of component
-            matrices.  Entry i is the index at which block matrix i begins.
+            matrices plus 1.  Entry i is the index at which block matrix i
+            begins and the last entry is the total number of indices.
         perm: To ensure the matrix is block diagonal, it is sometimes
             necessary to reorder the indices. For convenience we would like
             to store the matrix as a block diagonal, but then perform
@@ -248,7 +249,10 @@ class BlockDiagonalMatrix(object):
             dotted with v. In particular perm and inv_perm work together so
             that (M @ v[perm])[inv_perm] returns the correct matrix vector
             in the original indexing. All of this is implemented in the methods
-            so that this is hidden from the user.
+            so that this is hidden from the user. If `missing` is also set,
+            then those entries are ignored, and perm should be the length of
+            the non-missing entries, so that to apply the permutation
+            we can do v[non_missing][perm].
         inv_perm: See perm -- inv_perm is the inverse permutation of perm so
             that v[perm][inv_perm] = v
         shape: The dimensions of the matrix
@@ -301,9 +305,6 @@ class BlockDiagonalMatrix(object):
             if not isinstance(matrix, LowRankMatrix):
                 raise ValueError('Component matrices must be of type '
                                  'LowRankMatrix')
-            if len(matrix.shape) != 2:
-                raise ValueError('matrices contained something that '
-                                 'was not a matrix.')
         self.matrices = matrices
         self._inverted = inverse
 
@@ -319,11 +320,15 @@ class BlockDiagonalMatrix(object):
         if perm is None:
             self.perm = np.arange(self.shape[1])
         else:
-            if perm.shape[0] != self.shape[1]:
+            if perm.shape[0] != self.shape[1] - self.missing.shape[0]:
                 raise ValueError('perm must be a vector conformal '
-                                 'to the matrix.')
-            self.perm = perm
+                                 'to the non-missing parts of the matrix.')
+            self.perm = np.copy(perm)
         self.inv_perm = np.argsort(self.perm)
+        if not np.allclose(self.perm[self.inv_perm],
+                           np.arange(self.perm.shape[0])):
+            raise ValueError('perm and missing should together contain all '
+                             'of the indices. Some are missing.')
 
     def dot_i(self, vector, i):
         """Compute (Matrix @ vector)[i]"""
