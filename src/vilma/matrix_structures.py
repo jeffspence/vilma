@@ -8,23 +8,22 @@ Classes:
     BlockDiagonalMatrix: A datastructure for storing symmetric block diagonal
         matrices
 """
-from __future__ import print_function
 from __future__ import division
 
 import numpy as np
 import string
-# import scipy.sparse.linalg
 
 
 def _svd_threshold(X, ld_thresh):
     """Perform SVD on X and truncate to keep large eigenvalues"""
     s, vecs = np.linalg.eigh(X)
-    # u, s, v = np.linalg.svd(X)
     big_sing_vals = np.where(s >= 1 - np.sqrt(ld_thresh))[0]
     if len(big_sing_vals > 0):
         k = big_sing_vals
     else:
-        k = np.array([])
+        return (np.ones((X.shape[0], 1)),
+                np.zeros(1),
+                np.ones((1, X.shape[1])))
     u = np.copy(vecs[:, k])
     s = np.copy(s[k])
     v = np.copy(u.T)
@@ -59,6 +58,7 @@ class LowRankMatrix(object):
             a K x P dimensional numpy array.
         D: The diagonal component of the approximation stored as a P
             dimensional numpy array.
+        shape: The shape of the matrix as a tuple
 
     Methods:
         dot: M.dot(v) computes the dot product M @ v
@@ -71,7 +71,7 @@ class LowRankMatrix(object):
         __pow__: Computes the matrix power of the matrix.
         get_rank: Returns the rank of the matrix
     """
-    def __init__(self, X=None, t=0.0, u=None, s=None, v=None, D=None,
+    def __init__(self, X=None, t=1.0, u=None, s=None, v=None, D=None,
                  hdf_file=None):
         """
         Build a LowRankMatrix from a symmetric matrix or its SVD decomposition
@@ -140,8 +140,7 @@ class LowRankMatrix(object):
             self.s = np.zeros(1)
             self.v[:, :] = v[None, 0, :]
             self.inv_s = np.zeros((1))
-        self.shape = np.array((self.u.shape[0], self.v.shape[1]))
-        print("SVD shape", self.shape, 'With ', self.s.shape)
+        self.shape = (self.u.shape[0], self.v.shape[1])
 
     def dot(self, vector):
         """Compute Matrix @ vector"""
@@ -325,7 +324,6 @@ class BlockDiagonalMatrix(object):
                                  'to the matrix.')
             self.perm = perm
         self.inv_perm = np.argsort(self.perm)
-        print("block shape", self.shape)
 
     def dot_i(self, vector, i):
         """Compute (Matrix @ vector)[i]"""
