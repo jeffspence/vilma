@@ -182,42 +182,35 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
                 idx = idx[keep]
                 if len(idx) == 0:
                     continue
-                perm.append(idx)
                 signs = np.ones(len(idx))
                 stay = [
-                    v1 == v2 for v1, v2 in
+                    (xa1 == ya1) and (xa2 == ya2)
+                    for xa1, ya1, xa2, ya2 in
                     zip(variants['A1'].iloc[idx].to_numpy(),
-                        snp_metadata['A1'].iloc[variant_indices].to_numpy())
+                        snp_metadata['A1'].iloc[variant_indices].to_numpy(),
+                        variants['A2'].iloc[idx].to_numpy(),
+                        snp_metadata['A2'].iloc[variant_indices].to_numpy())
                 ]
                 stay = np.array(stay)
-                assert np.all(
-                    variants['A2'].iloc[idx].iloc[stay].to_numpy()
-                    ==
-                    snp_metadata['A2'].iloc[
-                        variant_indices].iloc[stay].to_numpy()
-                )
-                flip = ~stay
+                flip = [
+                    (xa1 == ya1) and (xa2 == ya2)
+                    for xa1, ya2, xa2, ya1 in
+                    zip(variants['A1'].iloc[idx].to_numpy(),
+                        snp_metadata['A1'].iloc[variant_indices].to_numpy(),
+                        variants['A2'].iloc[idx].to_numpy(),
+                        snp_metadata['A2'].iloc[variant_indices].to_numpy())
+                ]
+                flip = np.array(flip)
                 total_flipped += flip.sum()
-                assert np.all(
-                    variants['A2'].iloc[idx].iloc[flip].to_numpy()
-                    ==
-                    snp_metadata['A1'].iloc[
-                        variant_indices].iloc[flip].to_numpy()
-                )
-                assert np.all(
-                    variants['A1'].iloc[idx].iloc[flip].to_numpy()
-                    ==
-                    snp_metadata['A2'].iloc[
-                        variant_indices].iloc[flip].to_numpy()
-                )
+                mismatch = np.logical_and(~flip, ~stay)
+                if len(idx[~mismatch]) == 0:
+                    continue
                 signs[flip] = -1
                 signs = np.outer(signs, signs)
                 ld_matrix = np.copy(np.load(ld_path))
-                assert len(ld_matrix.shape) == 2 or len(ld_matrix.shape) == 0
                 if len(ld_matrix.shape) == 0:
                     ld_matrix = ld_matrix[None, None]
                     assert np.allclose(ld_matrix, 1)
-                assert ld_matrix.shape == ld_shape, (ld_matrix.shape, ld_shape)
                 logger.info('Proportion of variant indices being used: %e'
                             % np.mean(variant_indices))
 
@@ -226,7 +219,9 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
                 accepted_matrix = accepted_matrix * signs
                 assert accepted_matrix.shape == (np.sum(variant_indices),
                                                  np.sum(variant_indices))
-
+                accepted_matrix = accepted_matrix[np.ix_(~mismatch,
+                                                         ~mismatch)]
+                perm.append(idx[~mismatch])
                 svds.append(
                     LowRankMatrix(accepted_matrix, t, hdf_file=hdf_file)
                 )

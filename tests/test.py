@@ -576,6 +576,7 @@ def test_load_ld_from_schema():
     true_ldmat = np.eye(13)
     true_ldmat[0, 2] = -1
     true_ldmat[2, 0] = -1
+    true_ldmat[5, 5] = 0
     true_ldmat[12, 12] = 0
     v = np.random.random(13)
     assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))
@@ -586,6 +587,7 @@ def test_load_ld_from_schema():
     true_ldmat = np.eye(13)
     true_ldmat[0, 2] = -1
     true_ldmat[2, 0] = -1
+    true_ldmat[5, 5] = 0
     true_ldmat[12, 12] = 0
     v = np.random.random(13)
     assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))
