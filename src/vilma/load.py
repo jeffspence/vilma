@@ -210,15 +210,12 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
                 ld_matrix = np.copy(np.load(ld_path))
                 if len(ld_matrix.shape) == 0:
                     ld_matrix = ld_matrix[None, None]
-                    assert np.allclose(ld_matrix, 1)
                 logger.info('Proportion of variant indices being used: %e'
                             % np.mean(variant_indices))
 
                 accepted_matrix = np.copy(ld_matrix[np.ix_(variant_indices,
                                                            variant_indices)])
                 accepted_matrix = accepted_matrix * signs
-                assert accepted_matrix.shape == (np.sum(variant_indices),
-                                                 np.sum(variant_indices))
                 accepted_matrix = accepted_matrix[np.ix_(~mismatch,
                                                          ~mismatch)]
                 perm.append(idx[~mismatch])
@@ -243,8 +240,6 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
     if not np.all(perm == np.arange(len(perm))):
         logger.info('The variants in the extract file and the variants in the '
                     'LD matrix were not in the same order.')
-    assert len(perm) == variants.shape[0]
-    assert len(perm) == len(set(perm))
     perm = np.array(perm)
     bm = BlockDiagonalMatrix(svds, perm=perm, missing=missing)
 
