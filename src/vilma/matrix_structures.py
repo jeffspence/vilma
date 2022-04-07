@@ -249,10 +249,7 @@ class BlockDiagonalMatrix(object):
             dotted with v. In particular perm and inv_perm work together so
             that (M @ v[perm])[inv_perm] returns the correct matrix vector
             in the original indexing. All of this is implemented in the methods
-            so that this is hidden from the user. If `missing` is also set,
-            then those entries are ignored, and perm should be the length of
-            the non-missing entries, so that to apply the permutation
-            we can do v[non_missing][perm].
+            so that this is hidden from the user.
         inv_perm: See perm -- inv_perm is the inverse permutation of perm so
             that v[perm][inv_perm] = v
         shape: The dimensions of the matrix
@@ -320,7 +317,7 @@ class BlockDiagonalMatrix(object):
         if perm is None:
             self.perm = np.arange(self.shape[1])
         else:
-            if perm.shape[0] != self.shape[1] - self.missing.shape[0]:
+            if perm.shape[0] != self.shape[1]:
                 raise ValueError('perm must be a vector conformal '
                                  'to the non-missing parts of the matrix.')
             self.perm = np.copy(perm)

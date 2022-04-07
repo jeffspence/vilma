@@ -472,14 +472,134 @@ def test_load_variant_list():
     with raises(ValueError):
         load.load_variant_list('test_data/bad_variants_missing_a2.tsv')
 
+    variants = load.load_variant_list('test_data/good_variants.tsv')
+    assert len(variants) == 13
+    assert 'ID' in variants.columns
+    assert 'A1' in variants.columns
+    assert 'A2' in variants.columns
+
 
 def test_load_annotations():
-    pass
+    variants = load.load_variant_list('test_data/good_variants.tsv')
+    null_annotation, denylist = load.load_annotations(None, variants)
+    assert null_annotation.shape == (13, 1)
+    assert np.allclose(null_annotation, 1)
+    assert len(denylist) == 0
+
+    true_annotations, denylist = load.load_annotations(
+        'test_data/good_annotations.tsv', variants
+    )
+    assert true_annotations.shape == (13, 6)
+    assert np.all(np.sum(true_annotations, axis=1) == 1)
+    assert np.all(np.sum(true_annotations, axis=0)[1:] == 2)
+    assert np.sum(true_annotations, axis=0)[0] == 3
+    assert len(denylist) == 1
+    assert denylist[0] == 12
+
+    with raises(ValueError):
+        load.load_annotations('test_data/bad_annotations_missing_id.tsv',
+                              variants)
+    with raises(ValueError):
+        load.load_annotations(
+            'test_data/bad_annotations_missing_annotation.tsv',
+            variants
+        )
 
 
 def test_load_sumstats():
-    pass
+    variants = load.load_variant_list('test_data/good_variants.tsv')
+    stats, denylist = load.load_sumstats('test_data/good_sumstats_beta.tsv',
+                                         variants)
+    assert len(denylist) == 3
+    assert set(denylist) == set([10, 11, 12])
+    assert len(stats) == 13
+    assert np.all(stats.BETA.iloc[0:10] == np.arange(10))
+    assert np.all(stats.BETA.iloc[10:13] == 0.)
+    assert np.all(stats.SE.iloc[0:10] == np.arange(10) + 1)
+    assert np.all(stats.SE.iloc[10:13] == 1.)
+
+    stats, denylist = load.load_sumstats('test_data/good_sumstats_or.tsv',
+                                         variants)
+    assert len(denylist) == 3
+    assert set(denylist) == set([10, 11, 12])
+    assert len(stats) == 13
+    assert np.allclose(stats.BETA.iloc[0:10],
+                       np.log(np.arange(10) + 1.))
+    assert np.all(stats.BETA.iloc[10:13] == 0.)
+    assert np.all(stats.SE.iloc[0:10] == np.arange(10) + 1)
+    assert np.all(stats.SE.iloc[10:13] == 1.)
+
+    stats, denylist = load.load_sumstats('test_data/good_sumstats_flip.tsv',
+                                         variants)
+    assert len(denylist) == 4
+    assert set(denylist) == set([0, 10, 11, 12])
+    assert len(stats) == 13
+    assert np.all(stats.BETA.iloc[0:10] == -np.arange(10))
+    assert np.all(stats.BETA.iloc[10:13] == 0.)
+    assert np.all(stats.SE.iloc[0:10] == np.arange(10) + 1)
+    assert np.all(stats.SE.iloc[10:13] == 1.)
+
+    with raises(ValueError):
+        stats, denylist = load.load_sumstats(
+            'test_data/bad_sumstats_missing_id.tsv',
+            variants
+        )
+    with raises(ValueError):
+        stats, denylist = load.load_sumstats(
+            'test_data/bad_sumstats_missing_beta.tsv',
+            variants
+        )
+    with raises(ValueError):
+        stats, denylist = load.load_sumstats(
+            'test_data/bad_sumstats_missing_se.tsv',
+            variants
+        )
+    with raises(ValueError):
+        stats, denylist = load.load_sumstats(
+            'test_data/bad_sumstats_missing_a1.tsv',
+            variants
+        )
+
+    with raises(ValueError):
+        stats, denylist = load.load_sumstats(
+            'test_data/bad_sumstats_missing_a2.tsv',
+            variants
+        )
 
 
 def test_load_ld_from_schema():
-    pass
+    variants = load.load_variant_list('test_data/good_variants.tsv')
+    denylist = []
+    ldmat = load.load_ld_from_schema(
+        'test_data/ld_manifest.tsv', variants, denylist, 1., False
+    )
+    true_ldmat = np.eye(13)
+    true_ldmat[0, 2] = -1
+    true_ldmat[2, 0] = -1
+    true_ldmat[12, 12] = 0
+    v = np.random.random(13)
+    assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))
+
+    ldmat = load.load_ld_from_schema(
+        'test_data/ld_manifest.tsv', variants, denylist, 1., True
+    )
+    true_ldmat = np.eye(13)
+    true_ldmat[0, 2] = -1
+    true_ldmat[2, 0] = -1
+    true_ldmat[12, 12] = 0
+    v = np.random.random(13)
+    assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))
+
+    denylist = [3, 4, 5]
+    ldmat = load.load_ld_from_schema(
+        'test_data/ld_manifest.tsv', variants, denylist, 1., False
+    )
+    true_ldmat = np.eye(13)
+    true_ldmat[0, 2] = -1
+    true_ldmat[2, 0] = -1
+    true_ldmat[3, 3] = 0
+    true_ldmat[4, 4] = 0
+    true_ldmat[5, 5] = 0
+    true_ldmat[12, 12] = 0
+    v = np.random.random(13)
+    assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))

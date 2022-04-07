@@ -38,13 +38,15 @@ def load_variant_list(variant_filename):
     if 'A2' not in variants.columns:
         raise ValueError('Variant file must contain a column labeled A2')
 
+    variants = variants[['ID', 'A1', 'A2']]
+
     return variants
 
 
 def load_annotations(annotations_filename, variants):
     """Read `annotations_filename`  and match annotations to `variants`"""
     if annotations_filename is None:
-        return np.ones((variants.shape[0], 1))
+        return np.ones((variants.shape[0], 1)), []
 
     df = pd.read_csv(annotations_filename,
                      header=0,
@@ -70,7 +72,9 @@ def load_annotations(annotations_filename, variants):
 
 def load_sumstats(sumstats_filename, variants):
     """Load summary stats from `sumstats_filename` and match to `variants`"""
-    sumstats = pd.read_table(sumstats_filename)
+    sumstats = pd.read_csv(sumstats_filename,
+                           header=0,
+                           delim_whitespace=True)
 
     if 'ID' not in sumstats.columns:
         raise ValueError('Summary Statistics File must contain a column '
@@ -80,24 +84,38 @@ def load_sumstats(sumstats_filename, variants):
         raise ValueError('Summary Statistics File must contain a column '
                          'labeled A1')
 
+    if 'A2' not in sumstats.columns:
+        raise ValueError('Summary Statistics File must contain a column '
+                         'labeled A2')
+
+    if 'SE' not in sumstats.columns:
+        raise ValueError('Summary Statistics File must contain a column '
+                         'labeled SE')
+
     if 'BETA' not in sumstats.columns:
         if 'OR' not in sumstats.columns:
             raise ValueError('Summary stat file needs to contain either'
                              'BETA or OR filed.')
-        sumstats.BETA = np.log(sumstats.OR)
+        sumstats['BETA'] = np.log(sumstats.OR)
 
     sumstats = pd.merge(variants, sumstats, on='ID', how='left')
     missing = np.logical_or(np.isnan(sumstats.BETA.values),
                             np.isnan(sumstats.SE.values))
-    stay_allele = sumstats.A1_x == sumstats.A1_y
+    stay_allele = ((sumstats.A1_x == sumstats.A1_y)
+                   & (sumstats.A2_x == sumstats.A2_y))
+    flip_allele = ((sumstats.A1_x == sumstats.A2_y)
+                   & (sumstats.A1_y == sumstats.A2_x))
+    missing = (sumstats.BETA.isna()
+               | sumstats.SE.isna()
+               | ((~stay_allele) & (~flip_allele)))
     logging.info('%d out of %d total variants are missing sumstats',
                  missing.sum(),
-                 sumstats.BETA.values.shape[0])
-    logging.info('%d alleles do not match.  Those have been flipped',
-                 (~stay_allele).sum() - missing.sum())
+                 sumstats.shape[0])
+    logging.info('%d alleles have been flipped',
+                 (flip_allele).sum())
     sumstats.loc[missing, 'BETA'] = 0.
     sumstats.loc[missing, 'SE'] = 1.
-    sumstats.loc[~stay_allele, 'BETA'] = -sumstats.loc[~stay_allele, 'BETA']
+    sumstats.loc[flip_allele, 'BETA'] = -sumstats.loc[flip_allele, 'BETA']
     return sumstats, np.where(missing)[0].tolist()
 
 
@@ -134,11 +152,18 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
     with open(schema_path, 'r') as schema:
         for line in schema:
             snp_path, ld_path = line.split()
+            # relative path:
+            if snp_path[0] != '/':
+                snp_path = ('/'.join(schema_path.split('/')[:-1])
+                            + '/' + snp_path)
+                ld_path = ('/'.join(schema_path.split('/')[:-1])
+                           + '/' + ld_path)
 
-            snp_metadata = pd.read_table(snp_path,
-                                         header=None,
-                                         names=['ID', 'CHROM', 'BP',
-                                                'CM', 'A1', 'A2'])
+            snp_metadata = pd.read_csv(snp_path,
+                                       header=None,
+                                       delim_whitespace=True,
+                                       names=['ID', 'CHROM', 'BP',
+                                              'CM', 'A1', 'A2'])
 
             ld_shape = (snp_metadata.shape[0], snp_metadata.shape[0])
 
@@ -220,7 +245,6 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
     logger.info('The alleles did not match for %d variants. They were '
                 'flipped', total_flipped)
     perm = np.concatenate([perm, missing])
-
     if not np.all(perm == np.arange(len(perm))):
         logger.info('The variants in the extract file and the variants in the '
                     'LD matrix were not in the same order.')
