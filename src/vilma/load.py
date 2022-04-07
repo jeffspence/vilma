@@ -17,8 +17,8 @@ import logging
 import sys
 import h5py
 from tempfile import TemporaryFile
-from matrix_structures import LowRankMatrix
-from matrix_structures import BlockDiagonalMatrix
+from vilma.matrix_structures import LowRankMatrix
+from vilma.matrix_structures import BlockDiagonalMatrix
 
 
 logger = logging.getLogger()
@@ -35,6 +35,8 @@ def load_variant_list(variant_filename):
         raise ValueError('Variant file must contain a column labeled ID')
     if 'A1' not in variants.columns:
         raise ValueError('Variant file must contain a column labeled A1')
+    if 'A2' not in variants.columns:
+        raise ValueError('Variant file must contain a column labeled A2')
 
     return variants
 

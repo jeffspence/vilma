@@ -465,7 +465,12 @@ def test_BlockDiagonalMatrix_get_rank():
 
 
 def test_load_variant_list():
-    pass
+    with raises(ValueError):
+        load.load_variant_list('test_data/bad_variants_missing_id.tsv')
+    with raises(ValueError):
+        load.load_variant_list('test_data/bad_variants_missing_a1.tsv')
+    with raises(ValueError):
+        load.load_variant_list('test_data/bad_variants_missing_a2.tsv')
 
 
 def test_load_annotations():
