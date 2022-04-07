@@ -1,6 +1,7 @@
 import numpy as np
 from pytest import raises
 from vilma import matrix_structures as mat_structs
+from vilma import load
 
 
 ###############################################################################
@@ -455,3 +456,25 @@ def test_BlockDiagonalMatrix_get_rank():
     m1 = mat_structs.LowRankMatrix(X=x1, t=0.5)
     m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
     assert m.get_rank() == 6
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+# test load.py
+
+
+def test_load_variant_list():
+    pass
+
+
+def test_load_annotations():
+    pass
+
+
+def test_load_sumstats():
+    pass
+
+
+def test_load_ld_from_schema():
+    pass

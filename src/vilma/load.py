@@ -26,16 +26,34 @@ handler = logging.StreamHandler(sys.stdout)
 logger.addHandler(handler)
 
 
-def load_variant_list(variant_path):
-    """Read in a list of variants from `variant_path`"""
-    return pd.read_table(variant_path).drop_duplicates()
+def load_variant_list(variant_filename):
+    """Read in a list of variants from `variant_filename`"""
+    variants = pd.read_csv(variant_filename,
+                           header=0,
+                           delim_whitespace=True).drop_duplicates()
+    if 'ID' not in variants.columns:
+        raise ValueError('Variant file must contain a column labeled ID')
+    if 'A1' not in variants.columns:
+        raise ValueError('Variant file must contain a column labeled A1')
+
+    return variants
 
 
-def load_annotations(annotations_file, variants):
-    """Read `annotations_file`  and match annotations to `variants`"""
-    if annotations_file is None:
+def load_annotations(annotations_filename, variants):
+    """Read `annotations_filename`  and match annotations to `variants`"""
+    if annotations_filename is None:
         return np.ones((variants.shape[0], 1))
-    df = pd.read_table(annotations_file)
+
+    df = pd.read_csv(annotations_filename,
+                     header=0,
+                     delim_whitespace=True)
+
+    if 'ID' not in df.columns:
+        raise ValueError('Annotation file must contain a column labeled ID')
+    if 'ANNOTATION' not in df.columns:
+        raise ValueError('Annotation file must contain a column labeled '
+                         'ANNOTATION')
+
     df = pd.merge(variants, df, on='ID', how='left')
     df = pd.DataFrame(df['ANNOTATION'])
     logging.info('%d out of %d total variants are missing annotations',
@@ -48,15 +66,25 @@ def load_annotations(annotations_file, variants):
                           dummy_na=False).to_numpy(), denylist
 
 
-def load_sumstats(sumstats_path, variants):
-    """Load summary stats from `sumstats_path` and match to `variants`"""
-    sumstats = pd.read_table(sumstats_path)
-    sumstats = pd.merge(variants, sumstats, on='ID', how='left')
+def load_sumstats(sumstats_filename, variants):
+    """Load summary stats from `sumstats_filename` and match to `variants`"""
+    sumstats = pd.read_table(sumstats_filename)
+
+    if 'ID' not in sumstats.columns:
+        raise ValueError('Summary Statistics File must contain a column '
+                         'labeled ID')
+
+    if 'A1' not in sumstats.columns:
+        raise ValueError('Summary Statistics File must contain a column '
+                         'labeled A1')
+
     if 'BETA' not in sumstats.columns:
         if 'OR' not in sumstats.columns:
-            raise IOError('Summary stat file needs to contain either'
-                          'BETA or OR filed.')
+            raise ValueError('Summary stat file needs to contain either'
+                             'BETA or OR filed.')
         sumstats.BETA = np.log(sumstats.OR)
+
+    sumstats = pd.merge(variants, sumstats, on='ID', how='left')
     missing = np.logical_or(np.isnan(sumstats.BETA.values),
                             np.isnan(sumstats.SE.values))
     stay_allele = sumstats.A1_x == sumstats.A1_y
