@@ -1,27 +1,26 @@
-from __future__ import division
-
+"""Constructs parsers for the command line interface. Calls optimizer"""
 import numpy as np
 import logging
 import argparse
 import itertools
 
-from natural_gradient import Easy_annotation_smart_vi
+from natural_gradient import MultiPopVI
 import load
-import scipy.stats
 import pickle
 
 
 def _main():
+    # Build command line arguments
     parser = argparse.ArgumentParser()
 
+    parser.add_argument('--logfile', required=False, type=str, default='',
+                        help='File to store information about the run. '
+                             'To print to stdout use "-". Defaults to '
+                             'no logging.')
     parser.add_argument('-K', '--components', default=12, type=int,
                         help='number of mixture components in prior'),
     parser.add_argument('--num-its', default=1000, type=int,
                         help='Maximum number of optimization iterations.'),
-    parser.add_argument('--xpcor', default=0.5, type=float,
-                        help='Expected Cross-population correlation')
-    parser.add_argument('--covariance-structure', default='simple', type=str,
-                        help='Named cross-population covariance prior')
     parser.add_argument('--ld-schema', required=True, type=str,
                         help='Comma-separate paths to LD panel schemas')
     parser.add_argument('--sumstats', required=True, type=str,
@@ -34,25 +33,30 @@ def _main():
                         help='Comma-separated paths to annotation file')
     parser.add_argument('--output', required=True, type=str,
                         help='Output path prefix')
-    parser.add_argument('--names', type=str,
+    parser.add_argument('--names', type=str, required=False,
                         help='Comma-separated names of the '
-                             'populations for output')
-    parser.add_argument('--method', type=str, default='easy',
-                        help='Use the "easy" annotation model, '
-                             'or the "hard" annotation model.')
-    parser.add_argument('-v', '--verbose', action='count', default=0,
-                        help='Verbose output')
+                             'populations for output. Defaults to '
+                             '0, 1,... ')
     parser.add_argument('--extract', required=True, type=str,
                         help='List of SNPs to include in analysis, '
-                             'with A1/A2 columns for alignment')
-    parser.add_argument('--scaled', dest='scaled', action='store_true')
+                             'with ID, A1, and A2 columns.')
+    parser.add_argument('--scaled', dest='scaled', action='store_true',
+                        help='Causes vilma to place a prior on '
+                             'frequency-scaled effect sizes intead of '
+                             'on effect sizes in their natural scaling.')
     parser.add_argument('--ldthresh', required=False, default=0.0,
                         help='Threhold for singular value approximation of '
-                             'LD matrix.',
+                             'LD matrix. Setting --ldthresh x guarantees '
+                             'that SNPs with an r^2 of x or larger will be '
+                             'linearly independent. So ldthresh of 0 will '
+                             'result in no singular value thresholding.',
                         type=float)
     parser.add_argument('--seed', type=int, default=42,
                         help='Seed for random number generation.')
-    parser.add_argument('--mmap', dest='mmap', action='store_true')
+    parser.add_argument('--mmap', dest='mmap', action='store_true',
+                        help='Store the LD matrix on disk instead of '
+                             'in memory.  This will result in substantially '
+                             'longer runtimes, but lower memory usage.')
     parser.add_argument('--learn-scaling', dest='scale_se',
                         action='store_true',
                         help='Whether or not to learn a scaling'
@@ -64,35 +68,47 @@ def _main():
                         help='Comma-separated list of heritabilities '
                              'to use for each population when '
                              'initializing.  These do not need to be '
-                             'particular accurate! They are just for '
+                             'particularly accurate. They are just for '
                              'initializing the optimization algorithm.')
-    parser.add_argument('--trait', dest='trait', action='store_true')
+    parser.add_argument('--trait', dest='trait', action='store_true',
+                        help='Consider different sumstats files as '
+                             'different traits instead of different '
+                             'populations. Currently unimplemented.')
+    parser.add_argument('--checkpoint-freq', type=int, default=-1,
+                        help='Store the model once every this many '
+                             'iterations. Defaults to no checkpointing.')
 
     args = parser.parse_args()
 
     np.random.seed(args.seed)
 
-    logger = logging.getLogger()
-    logger.setLevel(10*(2-args.verbose))     # defaults to 'INFO' logging
+    # Set up logging
+    if args.logfile == '-':
+        logging.basicConfig(level=50)
+    elif args.logfile:
+        logging.basicConfig(filename=args.logfile, level=50)
 
     if (not args.trait
             and args.ld_schema.count(',') != 1
             and args.ld_schema.count(',') != args.sumstats.count(',')):
-        raise IOError('Either need to imput one ld_schema or provide a '
-                      'sumstats file for each ld_schema.')
-    P = args.sumstats.count(',') + 1
-    K = args.components
+        raise ValueError('Either need to imput one ld_schema or provide a '
+                         'sumstats file for each ld_schema.')
 
-    names = list(map(str, range(P)))
+    num_pops = args.sumstats.count(',') + 1
+    num_components = args.components
 
+    # Get names, or set to 0, 1, ...
+    names = list(map(str, range(num_pops)))
     if args.names is not None:
-        assert args.names.count(',') == args.sumstats.count(',')
+        if args.names.count(',') != args.sumstats.count(','):
+            raise ValueError('If --names are provided, one must be '
+                             'provided per sumstat file.')
         names = args.names.split(',')
 
-    logger.info('Loading variants...')
+    logging.info('Loading variants...')
     variants = load.load_variant_list(args.extract)
 
-    logger.info('Loading annotations...')
+    logging.info('Loading annotations...')
     annotations, denylist = load.load_annotations(args.annotations,
                                                   variants=variants)
 
@@ -109,12 +125,12 @@ def _main():
     init_hg = np.zeros_like(gwas_N)
     init_hg[:] = list(map(float, args.init_hg.split(',')))
 
-    # LD matrices
+    # Load LD matrices and sumstats
     if args.trait:
-        assert len(args.ld_schema.split(',')) == 1
+        raise NotImplementedError('--trait has not been implemented yet.')
         any_missing = None
         for idx, sumstats_path in enumerate(args.sumstats.split(',')):
-            logger.info('Loading sumstats for trait %d...' % (idx+1))
+            logging.info('Loading sumstats for trait %d...' % (idx+1))
             sumstats, missing = load.load_sumstats(sumstats_path,
                                                    variants=variants)
             if any_missing is None:
@@ -123,11 +139,11 @@ def _main():
                 any_missing.extend(missing.tolist())
 
             combined_betas.append(np.array(sumstats.BETA).reshape((1, -1)))
-            logger.info('Largest beta is... %f',
-                        np.max(np.abs(np.array(sumstats.BETA))))
+            logging.info('Largest beta is... %f',
+                         np.max(np.abs(np.array(sumstats.BETA))))
             combined_errors.append(np.array(sumstats.SE).reshape((1, -1))
                                    * stderr_mult[idx])
-        logger.info('Loading LD')
+        logging.info('Loading LD')
         any_missing = np.array(list(sorted(set(any_missing))))
         ld = load.load_ld_from_schema(args.ld_schema,
                                       variants=variants,
@@ -140,17 +156,17 @@ def _main():
         for idx, (ld_schema_path, sumstats_path) in enumerate(
                 zip(*(args.ld_schema.split(','),
                     args.sumstats.split(',')))):
-            logger.info('Loading sumstats for population %d...' % (idx+1))
+            logging.info('Loading sumstats for population %d...' % (idx+1))
             sumstats, missing = load.load_sumstats(sumstats_path,
                                                    variants=variants)
             missing.extend(denylist)
             combined_betas.append(np.array(sumstats.BETA).reshape((1, -1)))
-            logger.info('Largest beta is... %f',
-                        np.max(np.abs(np.array(sumstats.BETA))))
+            logging.info('Largest beta is... %f',
+                         np.max(np.abs(np.array(sumstats.BETA))))
             combined_errors.append(np.array(sumstats.SE).reshape((1, -1))
                                    * stderr_mult[idx])
 
-            logger.info('Loading LD for population %d...' % (idx+1))
+            logging.info('Loading LD for population %d...' % (idx+1))
             ld = load.load_ld_from_schema(ld_schema_path,
                                           variants=variants,
                                           denylist=missing,
@@ -158,17 +174,14 @@ def _main():
                                           mmap=args.mmap)
             combined_ld.append(ld)
 
-    assert np.all(np.isfinite(combined_betas))
-    assert np.all(np.isfinite(combined_errors))
-    logger.info('Largest beta is... %f', np.max(np.abs(combined_betas)))
+    logging.info('Largest beta is... %f', np.max(np.abs(combined_betas)))
 
     betas = np.concatenate(combined_betas, axis=0)
     std_errs = np.concatenate(combined_errors, axis=0)
 
-    logger.info('Building cross-population covariances...')
+    logging.info('Building cross-population covariances...')
     if args.scaled:
         maxes = np.nanmax((betas/std_errs)**2, axis=1)
-        # maxes = np.nanmax((betas/std_errs)**2-1, axis=1) # empirical Bayes
         mins = np.zeros_like(maxes)
         for p in range(len(mins)):
             this_keep = betas[p, :]**2 > 0
@@ -177,7 +190,6 @@ def _main():
                2.5
             )
     else:
-        # maxes = np.nanmax(betas**2, axis=1)   # old version
         maxes = np.zeros(betas.shape[0])
         mins = np.zeros_like(maxes)
         for p in range(len(mins)):
@@ -194,62 +206,36 @@ def _main():
             maxes[p] = np.max(probs*raw_means)**2
             mins[p] = np.nanpercentile(betas[p, betas[p, :]**2 > 0]**2, 2.5)
 
-    cross_pop_covs = _make_simple(P, K, mins, maxes)
+    cross_pop_covs = _make_simple(num_pops, num_components, mins, maxes)
 
-    print(cross_pop_covs)
-    print([mc.shape for mc in cross_pop_covs])
     with open("%s.covariance.pkl" % args.output, "wb") as ofile:
         pickle.dump([cross_pop_covs], ofile)
 
-    logger.info('Fitting...')
+    logging.info('Fitting...')
 
-    if args.method == 'hard':
-        raise NotImplementedError('Hard annotation model has not yet been '
-                                  'implemented')
+    if args.trait:
+        raise NotImplementedError('--trait has not been implemented yet.')
     else:
-        if args.trait:
-            '''
-            elbo = Trait_projective_vi(
-                marginal_effects=betas,
-                std_errs=std_errs,
-                ld_mats=combined_ld,
-                mixture_covs=cross_pop_covs,
-                annotations=annotations,
-                checkpoint_freq=2*args.num_its,
-                output=args.output,
-                scaled=args.scaled,
-                scale_se=True,
-                gwas_N=gwas_N,
-                init_hg=init_hg,
-                num_its=args.num_its
-            )
-            np.save(args.ouput + '.projections',
-                    elbo.projections)
-            '''
-            raise NotImplementedError('blah')
-        else:
-            elbo = Easy_annotation_smart_vi(
-                marginal_effects=betas,
-                std_errs=std_errs,
-                ld_mats=combined_ld,
-                mixture_covs=cross_pop_covs,
-                annotations=annotations,
-                checkpoint_freq=2*args.num_its,
-                output=args.output,
-                scaled=args.scaled,
-                scale_se=args.scale_se,
-                gwas_N=gwas_N,
-                init_hg=init_hg,
-                num_its=args.num_its,
-            )
-        # np.save(args.output + '.projections',
-        #         elbo.projections)
-        params = elbo.optimize()
-        np.savez(args.output, **dict(zip(elbo.param_names, params)))
-        for n, p in zip(names, elbo._real_posterior_mean(*params)):
-            variants['posterior_' + n] = p
+        elbo = MultiPopVI(
+            marginal_effects=betas,
+            std_errs=std_errs,
+            ld_mats=combined_ld,
+            mixture_covs=cross_pop_covs,
+            annotations=annotations,
+            checkpoint_freq=args.checkpoint_freq,
+            output=args.output,
+            scaled=args.scaled,
+            scale_se=args.scale_se,
+            gwas_N=gwas_N,
+            init_hg=init_hg,
+            num_its=args.num_its,
+        )
+    params = elbo.optimize()
+    np.savez(args.output, **dict(zip(elbo.param_names, params)))
+    for n, p in zip(names, elbo._real_posterior_mean(*params)):
+        variants['posterior_' + n] = p
 
-        variants.to_csv(args.output + '.estimates.tsv', sep='\t', index=False)
+    variants.to_csv(args.output + '.estimates.tsv', sep='\t', index=False)
 
 
 def _make_diag_vals(P, K, mins, maxes):
@@ -297,25 +283,7 @@ def _make_simple(P, K, mins, maxes):
                     cross_pop_covs.append(scale.dot(mat.dot(scale)))
 
     signs, _ = np.linalg.slogdet(cross_pop_covs)
-    assert np.all(signs == 1)
     return cross_pop_covs
-
-
-def _corr_mat(P, xpcor, scale=1):
-    to_return = ((1 - xpcor) * np.eye(P) + xpcor * np.ones((P, P)))
-    to_return = to_return * np.sqrt(scale)
-    to_return = to_return.T * np.sqrt(scale)
-    to_return = to_return
-    return to_return
-
-
-def _random_entry(P, cross_population_cor, num_components, scale=1):
-    scale_mat = _corr_mat(P, cross_population_cor, scale)
-    ret_val = scipy.stats.wishart.rvs(P, scale_mat, num_components) / P
-    ret_val = ret_val.reshape((num_components, P, P))
-    signs, _ = np.linalg.slogdet(ret_val)
-    assert np.all(signs == 1)
-    return ret_val
 
 
 if __name__ == '__main__':

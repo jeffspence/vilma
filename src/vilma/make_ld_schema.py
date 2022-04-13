@@ -10,6 +10,7 @@ from argparse import ArgumentParser
 
 
 def _arguments():
+    """Build command line arguments"""
     parser = ArgumentParser()
     parser.add_argument('-o', '--out-root', required=True, type=str,
                         help='Path for output schema')
@@ -66,6 +67,7 @@ def _process_blocks(blocked_data, outfile_name):
 
 
 def _assign_to_blocks(blocks, plink_data):
+    """Pull genotype data from `plink_data` and assign SNPs to blocks"""
     blocked_data = {}
     blocked_ids = {}
     chromosome = None
@@ -131,7 +133,7 @@ def _main():
             logging.info('...assigning SNPs to blocks')
             blocked_data = _assign_to_blocks(ld_blocks, plink_data)
 
-            logging.info('...processing LD blocks...')
+            logging.info('...processing LD blocks')
             _process_blocks(blocked_data, args.o)
 
     logging.info('Done!')

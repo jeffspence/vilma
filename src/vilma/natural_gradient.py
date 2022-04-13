@@ -717,7 +717,7 @@ class Nat_grad_optimizer(object):
         return -self._annotation_KL(*params)
 
 
-class Easy_annotation_smart_vi(Nat_grad_optimizer):
+class MultiPopVI(Nat_grad_optimizer):
     def __init__(self, mixture_covs=None,
                  num_random=0, **kwargs):
         num_pops = kwargs['marginal_effects'].shape[0]
