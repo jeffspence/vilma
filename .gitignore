@@ -3,3 +3,4 @@ src/vilma/*.swp
 tests/*.swp
 tests/__pycache*
 *.swp
+tests/test_data/test_ld_mats*

@@ -1,7 +1,15 @@
 import numpy as np
+import os
+import plinkio.plinkfile
 from pytest import raises
 from vilma import matrix_structures as mat_structs
 from vilma import load
+from vilma import make_ld_schema
+
+
+# everything should be relative to this files directory
+def correct_path(fname):
+    return os.path.join(os.path.dirname(__file__), 'test_data', fname)
 
 
 ###############################################################################
@@ -466,13 +474,13 @@ def test_BlockDiagonalMatrix_get_rank():
 
 def test_load_variant_list():
     with raises(ValueError):
-        load.load_variant_list('test_data/bad_variants_missing_id.tsv')
+        load.load_variant_list(correct_path('bad_variants_missing_id.tsv'))
     with raises(ValueError):
-        load.load_variant_list('test_data/bad_variants_missing_a1.tsv')
+        load.load_variant_list(correct_path('bad_variants_missing_a1.tsv'))
     with raises(ValueError):
-        load.load_variant_list('test_data/bad_variants_missing_a2.tsv')
+        load.load_variant_list(correct_path('bad_variants_missing_a2.tsv'))
 
-    variants = load.load_variant_list('test_data/good_variants.tsv')
+    variants = load.load_variant_list(correct_path('good_variants.tsv'))
     assert len(variants) == 13
     assert 'ID' in variants.columns
     assert 'A1' in variants.columns
@@ -480,14 +488,14 @@ def test_load_variant_list():
 
 
 def test_load_annotations():
-    variants = load.load_variant_list('test_data/good_variants.tsv')
+    variants = load.load_variant_list(correct_path('good_variants.tsv'))
     null_annotation, denylist = load.load_annotations(None, variants)
     assert null_annotation.shape == (13, 1)
     assert np.allclose(null_annotation, 1)
     assert len(denylist) == 0
 
     true_annotations, denylist = load.load_annotations(
-        'test_data/good_annotations.tsv', variants
+        correct_path('good_annotations.tsv'), variants
     )
     assert true_annotations.shape == (13, 6)
     assert np.all(np.sum(true_annotations, axis=1) == 1)
@@ -497,7 +505,7 @@ def test_load_annotations():
     assert denylist[0] == 12
 
     with raises(ValueError):
-        load.load_annotations('test_data/bad_annotations_missing_id.tsv',
+        load.load_annotations(correct_path('bad_annotations_missing_id.tsv'),
                               variants)
     with raises(ValueError):
         load.load_annotations(
@@ -507,9 +515,10 @@ def test_load_annotations():
 
 
 def test_load_sumstats():
-    variants = load.load_variant_list('test_data/good_variants.tsv')
-    stats, denylist = load.load_sumstats('test_data/good_sumstats_beta.tsv',
-                                         variants)
+    variants = load.load_variant_list(correct_path('good_variants.tsv'))
+    stats, denylist = load.load_sumstats(
+        correct_path('good_sumstats_beta.tsv'), variants
+    )
     assert len(denylist) == 3
     assert set(denylist) == set([10, 11, 12])
     assert len(stats) == 13
@@ -518,8 +527,10 @@ def test_load_sumstats():
     assert np.all(stats.SE.iloc[0:10] == np.arange(10) + 1)
     assert np.all(stats.SE.iloc[10:13] == 1.)
 
-    stats, denylist = load.load_sumstats('test_data/good_sumstats_or.tsv',
-                                         variants)
+    stats, denylist = load.load_sumstats(
+        correct_path('good_sumstats_or.tsv'),
+        variants
+    )
     assert len(denylist) == 3
     assert set(denylist) == set([10, 11, 12])
     assert len(stats) == 13
@@ -529,8 +540,10 @@ def test_load_sumstats():
     assert np.all(stats.SE.iloc[0:10] == np.arange(10) + 1)
     assert np.all(stats.SE.iloc[10:13] == 1.)
 
-    stats, denylist = load.load_sumstats('test_data/good_sumstats_flip.tsv',
-                                         variants)
+    stats, denylist = load.load_sumstats(
+        correct_path('good_sumstats_flip.tsv'),
+        variants
+    )
     assert len(denylist) == 4
     assert set(denylist) == set([0, 10, 11, 12])
     assert len(stats) == 13
@@ -541,37 +554,37 @@ def test_load_sumstats():
 
     with raises(ValueError):
         stats, denylist = load.load_sumstats(
-            'test_data/bad_sumstats_missing_id.tsv',
+            correct_path('bad_sumstats_missing_id.tsv'),
             variants
         )
     with raises(ValueError):
         stats, denylist = load.load_sumstats(
-            'test_data/bad_sumstats_missing_beta.tsv',
+            correct_path('bad_sumstats_missing_beta.tsv'),
             variants
         )
     with raises(ValueError):
         stats, denylist = load.load_sumstats(
-            'test_data/bad_sumstats_missing_se.tsv',
+            correct_path('bad_sumstats_missing_se.tsv'),
             variants
         )
     with raises(ValueError):
         stats, denylist = load.load_sumstats(
-            'test_data/bad_sumstats_missing_a1.tsv',
+            correct_path('bad_sumstats_missing_a1.tsv'),
             variants
         )
 
     with raises(ValueError):
         stats, denylist = load.load_sumstats(
-            'test_data/bad_sumstats_missing_a2.tsv',
+            correct_path('bad_sumstats_missing_a2.tsv'),
             variants
         )
 
 
 def test_load_ld_from_schema():
-    variants = load.load_variant_list('test_data/good_variants.tsv')
+    variants = load.load_variant_list(correct_path('good_variants.tsv'))
     denylist = []
     ldmat = load.load_ld_from_schema(
-        'test_data/ld_manifest.tsv', variants, denylist, 1., False
+        correct_path('ld_manifest.tsv'), variants, denylist, 1., False
     )
     true_ldmat = np.eye(13)
     true_ldmat[0, 2] = -1
@@ -582,7 +595,7 @@ def test_load_ld_from_schema():
     assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))
 
     ldmat = load.load_ld_from_schema(
-        'test_data/ld_manifest.tsv', variants, denylist, 1., True
+        correct_path('ld_manifest.tsv'), variants, denylist, 1., True
     )
     true_ldmat = np.eye(13)
     true_ldmat[0, 2] = -1
@@ -594,7 +607,7 @@ def test_load_ld_from_schema():
 
     denylist = [3, 4, 5]
     ldmat = load.load_ld_from_schema(
-        'test_data/ld_manifest.tsv', variants, denylist, 1., False
+        correct_path('ld_manifest.tsv'), variants, denylist, 1., False
     )
     true_ldmat = np.eye(13)
     true_ldmat[0, 2] = -1
@@ -605,3 +618,96 @@ def test_load_ld_from_schema():
     true_ldmat[12, 12] = 0
     v = np.random.random(13)
     assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+# test make_ld_schema.py
+
+
+def test_make_ld_schema_get_ld_blocks():
+    with raises(ValueError):
+        make_ld_schema._get_ld_blocks(correct_path('bad_blocks.bed'))
+
+    blocks = make_ld_schema._get_ld_blocks(correct_path('blocks.bed'))
+    assert len(blocks) == 1
+    assert '1' in blocks.keys()
+    assert len(blocks['1']) == 4
+    assert np.all(blocks['1']['chrom'] == '1')
+    assert np.all(blocks['1']['start'] == np.array([0, 8, 100, 950]))
+    assert np.all(blocks['1']['end'] == np.array([8, 100, 200, 1000]))
+
+
+def test_make_ld_schema_assign_to_blocks():
+    blocks = make_ld_schema._get_ld_blocks(correct_path('blocks.bed'))
+    plinkdata = plinkio.plinkfile.open(correct_path(
+        'sim_genotypes'
+    ))
+
+    blocked_data = make_ld_schema._assign_to_blocks(
+        blocks, plinkdata
+    )
+    assert len(blocked_data) == 3
+    assert '1 0' in blocked_data.keys()
+    assert '1 1' in blocked_data.keys()
+    assert '1 3' in blocked_data.keys()
+    for k in blocked_data.keys():
+        assert 'SNPs' in blocked_data[k].keys()
+        assert 'IDs' in blocked_data[k].keys()
+        assert blocked_data[k]['SNPs'].shape[1] == len(blocked_data[k]['IDs'])
+        assert len(blocked_data[k]['SNPs']) == 10
+    assert blocked_data['1 0']['SNPs'].shape[1] == 2
+    assert blocked_data['1 1']['SNPs'].shape[1] == 1
+    assert blocked_data['1 3']['SNPs'].shape[1] == 2
+
+
+def test_make_ld_schema():
+    # delete this file first to prevent appending to existing
+    with open(correct_path('test_ld_mats.schema'), 'w'):
+        pass
+    plinkdata = plinkio.plinkfile.open(correct_path(
+        'sim_genotypes'
+    ))
+    blocks = make_ld_schema._get_ld_blocks(correct_path('blocks.bed'))
+    blocked_data = make_ld_schema._assign_to_blocks(blocks, plinkdata)
+    make_ld_schema._process_blocks(blocked_data, correct_path('test_ld_mats'))
+    with open(correct_path('test_ld_mats.schema'), 'r') as fh:
+        varfile, matfile = fh.readline().split()
+        assert varfile == correct_path('test_ld_mats_1:0.var')
+        assert matfile == correct_path('test_ld_mats_1:0.npy')
+        mat = np.load(correct_path('test_ld_mats_1:0.npy'))
+        assert np.allclose(mat, np.ones_like(mat))
+        assert len(mat.shape) == 2
+        assert mat.shape[0] == 2
+        assert mat.shape[1] == 2
+        with open(varfile, 'r') as vfh:
+            assert vfh.readline() == '.\t1\t3\t0.0\tG\tT\n'
+            assert vfh.readline() == '.\t1\t4\t0.0\tG\tA\n'
+            assert not vfh.readline()
+
+        varfile, matfile = fh.readline().split()
+        assert varfile == correct_path('test_ld_mats_1:1.var')
+        assert matfile == correct_path('test_ld_mats_1:1.npy')
+        mat = np.load(correct_path('test_ld_mats_1:1.npy'))
+        assert np.allclose(mat, 1)
+        assert len(mat) == 1
+        with open(varfile, 'r') as vfh:
+            assert vfh.readline() == '.\t1\t9\t0.0\tC\tT\n'
+            assert not vfh.readline()
+
+        varfile, matfile = fh.readline().split()
+        assert varfile == correct_path('test_ld_mats_1:3.var')
+        assert matfile == correct_path('test_ld_mats_1:3.npy')
+        mat = np.load(correct_path('test_ld_mats_1:3.npy'))
+        assert np.allclose(np.diag(mat), 1)
+        assert len(mat.shape) == 2
+        assert mat.shape[0] == 2
+        assert mat.shape[1] == 2
+        assert np.isclose(mat[0, 1], -0.28867513)
+        assert np.isclose(mat[1, 0], -0.28867513)
+        with open(varfile, 'r') as vfh:
+            assert vfh.readline() == '.\t1\t962\t0.0\tT\tG\n'
+            assert vfh.readline() == '.\t1\t975\t0.0\tT\tC\n'
+            assert not vfh.readline()
+        assert not fh.readline()
