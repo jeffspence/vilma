@@ -1,12 +1,12 @@
 """
 Utilities for building a block LD matrix from genotype data
 """
-import plinkio.plinkfile
 import os
-import numpy as np
-import pandas as pd
 import logging
 from argparse import ArgumentParser
+import plinkio.plinkfile
+import numpy as np
+import pandas as pd
 
 
 def _arguments():
@@ -80,17 +80,17 @@ def _assign_to_blocks(blocks, plink_data):
         if str(locus.chromosome) != chromosome:
             raise ValueError('Each plink file should contain exactly one '
                              'chromosome.')
-        b = np.searchsorted(blocks[chromosome].start,
-                            locus.bp_position - 1,   # Plink is 1-indexed
-                            side='right') - 1
-        # check i SNP is before first block
-        if b < 0:
+        block_idx = np.searchsorted(blocks[chromosome].start,
+                                    locus.bp_position - 1,
+                                    side='right') - 1
+        # check if SNP is before first block
+        if block_idx < 0:
             continue
         # check if past the end of the block
-        if locus.bp_position >= blocks[chromosome].end[b]:
+        if locus.bp_position >= blocks[chromosome].end[block_idx]:
             continue
 
-        key_str = '{} {}'.format(chromosome, b)
+        key_str = '{} {}'.format(chromosome, block_idx)
         if key_str not in blocked_data:
             blocked_data[key_str] = []
             blocked_ids[key_str] = []
@@ -103,10 +103,10 @@ def _assign_to_blocks(blocks, plink_data):
         )
 
     # concatenate everything
-    for key in blocked_data:
-        block_gts = np.concatenate(blocked_data[key], axis=0).T
+    for key, value in blocked_data.items():
+        block_gts = np.concatenate(value, axis=0).T
         block_gts = np.array(block_gts, dtype=float)
-        block_gts[block_gts == 3] == np.nan
+        block_gts[block_gts == 3] = np.nan
         block_gts = pd.DataFrame(block_gts)
         blocked_data[key] = {'SNPs': block_gts,
                              'IDs': blocked_ids[key]}
@@ -116,7 +116,7 @@ def _assign_to_blocks(blocks, plink_data):
 def _main():
     args = _arguments()
 
-    logging.info('Reading LD blocks from %s' % args.b)
+    logging.info('Reading LD blocks from %s', args.b)
     ld_blocks = _get_ld_blocks(args.b)
 
     if os.path.exists(args.o + '.schema'):
@@ -128,7 +128,7 @@ def _main():
             logging.info('Working on plink file %d', idx + 1)
             logging.info('...reading data')
             plink_data = plinkio.plinkfile.open(
-                plink_manifest
+                line.strip()
             )
             logging.info('...assigning SNPs to blocks')
             blocked_data = _assign_to_blocks(ld_blocks, plink_data)
