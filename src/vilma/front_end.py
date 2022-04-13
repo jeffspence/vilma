@@ -4,7 +4,7 @@ import argparse
 import itertools
 import pickle
 import numpy as np
-from vilma.natural_gradient import MultiPopVI
+from vilma.variational_inference import MultiPopVI
 from vilma import load
 
 

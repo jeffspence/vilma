@@ -1,5 +1,6 @@
 src/vilma/*.pyc
 src/vilma/*.swp
+src/vilma/__pycache*
 tests/*.swp
 tests/__pycache*
 *.swp

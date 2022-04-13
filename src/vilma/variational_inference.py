@@ -1,8 +1,6 @@
-from __future__ import division
-
+import logging
 import numpy as np
 from numba import njit, prange
-import logging
 
 L_MAX = 1e12
 REL_TOL = 1e-6
@@ -13,31 +11,29 @@ MAX_GRAD = 100
 EPSILON = 1e-100
 ELBO_MOMENTUM = 0.5
 NUM_BIG_PASSES = 10
-logging.basicConfig()
-
-# TODO: document and comment
 
 
 @njit('float64[:, :, :](float64[:, :, :], float64[:, :, :], float64)',
-      parallel=True)
+      parallel=True, cache=True)
 def _sum_betas(old_beta, new_beta, step_size):
     return step_size * new_beta + (1.-step_size) * old_beta
 
 
-@njit('float64[:, :](float64[:, :], float64[:, :])', parallel=True)
+@njit('float64[:, :](float64[:, :], float64[:, :])', parallel=True, cache=True)
 def _fast_divide(x, y):
     return x/y
 
 
 @njit('float64[:, :](float64[:, :], float64[:, :], float64[:, :],'
-      'float64[:, :])', parallel=True)
+      'float64[:, :])', parallel=True, cache=True)
 def _fast_linked_ests(linked_ests, std_errs, post_mean, scaled_ld_diags):
     return linked_ests / std_errs - scaled_ld_diags * post_mean
 
 
 @njit('float64(float64[:, :], float64[:, :], float64[:, :], float64[:, :],'
       'float64[:, :],'
-      'float64[:, :], float64[:], float64[:], float64[:])', parallel=True)
+      'float64[:, :], float64[:], float64[:], float64[:])',
+      parallel=True, cache=True)
 def _fast_likelihood(post_means, post_vars, scaled_mu, scaled_ld_diags,
                      linked_ests,
                      adj_marginal, chi_stat, ld_ranks, error_scaling):
@@ -51,12 +47,14 @@ def _fast_likelihood(post_means, post_vars, scaled_mu, scaled_ld_diags,
             - 0.5 * ld_ranks * np.log(error_scaling)).sum()
 
 
-@njit('float64[:, :](float64[:, :], float64[:, :], float64)', parallel=True)
+@njit('float64[:, :](float64[:, :], float64[:, :], float64)',
+      parallel=True, cache=True)
 def _sum_deltas(old_delta, new_delta, step_size):
     return step_size * new_delta + (1.-step_size) * old_delta
 
 
-@njit('float64[:, :](float64[:, :, :], float64[:, :])', parallel=True)
+@njit('float64[:, :](float64[:, :, :], float64[:, :])',
+      parallel=True, cache=True)
 def _fast_posterior_mean(vi_mu, vi_delta):
     to_return = np.zeros((vi_mu.shape[1], vi_mu.shape[2]))
     for i in prange(vi_mu.shape[2]):
@@ -66,13 +64,14 @@ def _fast_posterior_mean(vi_mu, vi_delta):
 
 
 @njit('float64[:, :](float64[:, :], float64[:, :, :], float64[:, :],'
-      'float64[:, :, :])', parallel=True)
+      'float64[:, :, :])', parallel=True, cache=True)
 def _fast_pmv(mean, vi_mu, vi_delta, temp):
     second_moment = _fast_posterior_mean(temp + vi_mu**2, vi_delta)
     return second_moment - mean**2
 
 
-@njit('float64[:, :, :](float64[:, :, :], float64[:, :, :, :])', parallel=True)
+@njit('float64[:, :, :](float64[:, :, :], float64[:, :, :, :])',
+      parallel=True, cache=True)
 def _fast_nat_inner_product_m2(vi_mu, nat_sigma):
     to_return = np.empty_like(vi_mu)
     for i in prange(vi_mu.shape[2]):
@@ -85,7 +84,8 @@ def _fast_nat_inner_product_m2(vi_mu, nat_sigma):
     return to_return
 
 
-@njit('float64[:, :, :](float64[:, :, :], float64[:, :, :, :])', parallel=True)
+@njit('float64[:, :, :](float64[:, :, :], float64[:, :, :, :])',
+      parallel=True, cache=True)
 def _fast_nat_inner_product(vi_mu, nat_sigma):
     to_return = np.empty_like(vi_mu)
     for i in prange(vi_mu.shape[2]):
@@ -99,7 +99,7 @@ def _fast_nat_inner_product(vi_mu, nat_sigma):
 
 
 @njit('float64(float64[:, :, :], float64[:, :, :, :], float64[:, :])',
-      parallel=True)
+      parallel=True, cache=True)
 def _fast_inner_product_comp(vi_mu, mixture_prec, vi_delta):
     to_return = 0.
     for i in prange(vi_delta.shape[0]):
@@ -115,7 +115,8 @@ def _fast_inner_product_comp(vi_mu, mixture_prec, vi_delta):
     return 0.5 * to_return
 
 
-@njit('float64[:, :](float64[:, :], int64[:], int64)', parallel=True)
+@njit('float64[:, :](float64[:, :], int64[:], int64)',
+      parallel=True, cache=True)
 def _sum_annotations(deltas, annotations, num_annotations):
     to_return = np.zeros((num_annotations, deltas.shape[1]))
     for a in range(num_annotations):
@@ -127,7 +128,8 @@ def _sum_annotations(deltas, annotations, num_annotations):
     return to_return
 
 
-@njit('float64(float64[:, :], float64[:, :], int64[:])', parallel=True)
+@njit('float64(float64[:, :], float64[:, :], int64[:])',
+      parallel=True, cache=True)
 def _fast_delta_kl(vi_delta, hyper_delta, annotations):
     log_hyper = np.log(hyper_delta)
     to_return = 0.
@@ -137,13 +139,13 @@ def _fast_delta_kl(vi_delta, hyper_delta, annotations):
     return to_return
 
 
-@njit('float64(float64[:, :], float64[:, :])', parallel=True)
+@njit('float64(float64[:, :], float64[:, :])', parallel=True, cache=True)
 def _fast_beta_kl(sigma_summary, vi_delta):
     return 0.5 * (sigma_summary * vi_delta).sum()
 
 
 @njit('float64[:, :](float64[:, :], float64[:], int64[:])',
-      parallel=True)
+      parallel=True, cache=True)
 def _fast_vi_delta_grad(hyper_delta, log_det, annotations):
     to_return = np.empty((annotations.shape[0],
                           hyper_delta.shape[1]-1))
@@ -159,7 +161,7 @@ def _fast_vi_delta_grad(hyper_delta, log_det, annotations):
     return to_return
 
 
-@njit('float64[:, :](float64[:, :])', parallel=True)
+@njit('float64[:, :](float64[:, :])', parallel=True, cache=True)
 def _map_to_nat_cat_2D(probs):
     to_return = np.zeros((probs.shape[0], probs.shape[1] - 1))
     K = probs.shape[1]
@@ -170,13 +172,13 @@ def _map_to_nat_cat_2D(probs):
     return to_return
 
 
-@njit('float64[:, :](float64[:, :])', parallel=True)
+@njit('float64[:, :](float64[:, :])', cache=True)
 def _get_const_part(vi_log_det):
     return np.copy(vi_log_det.T)
 
 
 @njit('float64[:, :](float64[:, :, :], float64[:, :, :],'
-      'float64[:, :], float64[:, :])', parallel=True)
+      'float64[:, :], float64[:, :])', parallel=True, cache=True)
 def _fast_map_to_nat_vi_delta(vi_mu, old_nat_mu, const_part, vi_delta):
     old_nat_vi_delta = _map_to_nat_cat_2D(vi_delta)
     K = vi_mu.shape[0]
@@ -192,7 +194,7 @@ def _fast_map_to_nat_vi_delta(vi_mu, old_nat_mu, const_part, vi_delta):
     return old_nat_vi_delta
 
 
-@njit('float64[:, :](float64[:, :])', parallel=True)
+@njit('float64[:, :](float64[:, :])', parallel=True, cache=True)
 def _invert_nat_cat_2D(probs):
     to_return = np.empty((probs.shape[0], probs.shape[1] + 1))
     for i in prange(to_return.shape[0]):
@@ -211,10 +213,9 @@ def _invert_nat_cat_2D(probs):
 
 
 @njit('float64[:, :](float64[:, :, :], float64[:, :, :], float64[:, :],'
-      'float64[:, :])', parallel=True)
+      'float64[:, :])', parallel=True, cache=True)
 def _fast_invert_nat_vi_delta(new_mu, nat_mu, const_part, nat_vi_delta):
     to_invert = np.empty_like(nat_vi_delta)
-    # K = to_invert.shape[1]+1
     for i in prange(to_invert.shape[0]):
         last = const_part[i, -1]
         for j in range(nat_mu.shape[1]):
@@ -228,7 +229,7 @@ def _fast_invert_nat_vi_delta(new_mu, nat_mu, const_part, nat_vi_delta):
     return _invert_nat_cat_2D(to_invert)
 
 
-@njit('float64[:, :, :, :](float64[:, :, :, :])', parallel=True)
+@njit('float64[:, :, :, :](float64[:, :, :, :])', parallel=True, cache=True)
 def _matrix_invert_4d_numba(matrix):
     if matrix.shape[-1] == 0:
         return np.zeros_like(matrix)
@@ -248,7 +249,7 @@ def _matrix_invert_4d_numba(matrix):
         return np.full_like(matrix, np.nan)
 
 
-@njit('float64[:, :, :](float64[:, :, :])', parallel=True)
+@njit('float64[:, :, :](float64[:, :, :])', parallel=True, cache=True)
 def _matrix_invert_3d_numba(matrix):
     if matrix.shape[-1] == 0:
         return np.zeros_like(matrix)
@@ -278,25 +279,6 @@ def _matrix_invert(matrix):
     return np.linalg.inv(matrix)
 
 
-'''
-def _matrix_invert(matrix):
-    if matrix.shape[-1] == 0:
-        return np.zeros_like(matrix)
-    if matrix.shape[-1] == 1:
-        return 1. / matrix
-    if matrix.shape[-1] == 2:
-        to_return = np.empty_like(matrix)
-        det = 1. / (matrix[..., 0, 0] * matrix[..., 1, 1]
-                    - matrix[..., 0, 1] * matrix[..., 1, 0])
-        to_return[..., 0, 0] = matrix[..., 1, 1] * det
-        to_return[..., 1, 1] = matrix[..., 0, 0] * det
-        to_return[..., 0, 1] = -matrix[..., 0, 1] * det
-        to_return[..., 1, 0] = to_return[..., 0, 1]
-        return to_return
-    return np.linalg.inv(matrix)
-'''
-
-
 def _vi_sigma_inv(matrices):
     # kpqi->ikpq
     inv = _matrix_invert(
@@ -306,7 +288,7 @@ def _vi_sigma_inv(matrices):
     return np.transpose(inv, (1, 2, 3, 0))
 
 
-@njit('float64[:, :](float64[:, :, :, :])', parallel=True)
+@njit('float64[:, :](float64[:, :, :, :])', parallel=True, cache=True)
 def _matrix_log_det_4d_numba(matrix):
     if matrix.shape[-1] == 0:
         return np.zeros((matrix.shape[0], matrix.shape[1]))
@@ -321,7 +303,7 @@ def _matrix_log_det_4d_numba(matrix):
         return np.full((matrix.shape[0], matrix.shape[1]), np.nan)
 
 
-@njit('float64[:](float64[:, :, :])', parallel=True)
+@njit('float64[:](float64[:, :, :])', parallel=True, cache=True)
 def _matrix_log_det_3d_numba(matrix):
     if matrix.shape[-1] == 0:
         return np.zeros(matrix.shape[0])
@@ -345,7 +327,6 @@ def _matrix_log_det(matrix):
         return _matrix_log_det_3d_numba(matrix)
 
 
-# TODO: numba this
 def _vi_sigma_log_det(matrices):
     # kpqi->ikpq
     log_det = _matrix_log_det(
