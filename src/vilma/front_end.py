@@ -1,12 +1,11 @@
 """Constructs parsers for the command line interface. Calls optimizer"""
-import numpy as np
 import logging
 import argparse
 import itertools
-
-from natural_gradient import MultiPopVI
-import load
 import pickle
+import numpy as np
+from vilma.natural_gradient import MultiPopVI
+from vilma import load
 
 
 def _main():
@@ -18,9 +17,9 @@ def _main():
                              'To print to stdout use "-". Defaults to '
                              'no logging.')
     parser.add_argument('-K', '--components', default=12, type=int,
-                        help='number of mixture components in prior'),
+                        help='number of mixture components in prior')
     parser.add_argument('--num-its', default=1000, type=int,
-                        help='Maximum number of optimization iterations.'),
+                        help='Maximum number of optimization iterations.')
     parser.add_argument('--ld-schema', required=True, type=str,
                         help='Comma-separate paths to LD panel schemas')
     parser.add_argument('--sumstats', required=True, type=str,
@@ -119,10 +118,10 @@ def _main():
     stderr_mult = np.zeros(len(args.sumstats.split(',')))
     stderr_mult[:] = list(map(float, args.stderrscale.split(',')))
 
-    gwas_N = np.zeros_like(stderr_mult)
-    gwas_N[:] = list(map(float, args.samplesizes.split(',')))
+    gwas_n = np.zeros_like(stderr_mult)
+    gwas_n[:] = list(map(float, args.samplesizes.split(',')))
 
-    init_hg = np.zeros_like(gwas_N)
+    init_hg = np.zeros_like(gwas_n)
     init_hg[:] = list(map(float, args.init_hg.split(',')))
 
     # Load LD matrices and sumstats
@@ -130,7 +129,7 @@ def _main():
         raise NotImplementedError('--trait has not been implemented yet.')
         any_missing = None
         for idx, sumstats_path in enumerate(args.sumstats.split(',')):
-            logging.info('Loading sumstats for trait %d...' % (idx+1))
+            logging.info('Loading sumstats for trait %d...', (idx+1))
             sumstats, missing = load.load_sumstats(sumstats_path,
                                                    variants=variants)
             if any_missing is None:
@@ -145,18 +144,18 @@ def _main():
                                    * stderr_mult[idx])
         logging.info('Loading LD')
         any_missing = np.array(list(sorted(set(any_missing))))
-        ld = load.load_ld_from_schema(args.ld_schema,
-                                      variants=variants,
-                                      denylist=any_missing,
-                                      t=args.ldthresh,
-                                      mmap=args.mmap)
-        combined_ld.append(ld)
+        ld_mat = load.load_ld_from_schema(args.ld_schema,
+                                          variants=variants,
+                                          denylist=any_missing,
+                                          ldthresh=args.ldthresh,
+                                          mmap=args.mmap)
+        combined_ld.append(ld_mat)
 
     else:
         for idx, (ld_schema_path, sumstats_path) in enumerate(
                 zip(*(args.ld_schema.split(','),
                     args.sumstats.split(',')))):
-            logging.info('Loading sumstats for population %d...' % (idx+1))
+            logging.info('Loading sumstats for population %d...', (idx+1))
             sumstats, missing = load.load_sumstats(sumstats_path,
                                                    variants=variants)
             missing.extend(denylist)
@@ -166,13 +165,13 @@ def _main():
             combined_errors.append(np.array(sumstats.SE).reshape((1, -1))
                                    * stderr_mult[idx])
 
-            logging.info('Loading LD for population %d...' % (idx+1))
-            ld = load.load_ld_from_schema(ld_schema_path,
-                                          variants=variants,
-                                          denylist=missing,
-                                          t=args.ldthresh,
-                                          mmap=args.mmap)
-            combined_ld.append(ld)
+            logging.info('Loading LD for population %d...', (idx+1))
+            ld_mat = load.load_ld_from_schema(ld_schema_path,
+                                              variants=variants,
+                                              denylist=missing,
+                                              ldthresh=args.ldthresh,
+                                              mmap=args.mmap)
+            combined_ld.append(ld_mat)
 
     logging.info('Largest beta is... %f', np.max(np.abs(combined_betas)))
 
@@ -183,19 +182,20 @@ def _main():
     if args.scaled:
         maxes = np.nanmax((betas/std_errs)**2, axis=1)
         mins = np.zeros_like(maxes)
-        for p in range(len(mins)):
-            this_keep = betas[p, :]**2 > 0
-            mins[p] = np.nanpercentile(
-               (betas[p, this_keep]/std_errs[p, this_keep])**2,
+        for population in range(len(mins)):
+            this_keep = betas[population, :]**2 > 0
+            mins[population] = np.nanpercentile(
+               (betas[population, this_keep]
+                / std_errs[population, this_keep])**2,
                2.5
             )
     else:
         maxes = np.zeros(betas.shape[0])
         mins = np.zeros_like(maxes)
-        for p in range(len(mins)):
-            keep = ~np.isnan(betas[p])
-            this_beta = np.abs(betas[p, keep])
-            this_se = std_errs[p, keep]
+        for population in range(len(mins)):
+            keep = ~np.isnan(betas[population])
+            this_beta = np.abs(betas[population, keep])
+            this_se = std_errs[population, keep]
             psi = 1. / len(this_beta)
             probs = 1. / (1.
                           + ((1.-psi)/psi
@@ -203,8 +203,11 @@ def _main():
                              * np.exp(-0.5*this_beta**2/this_se**2 + 0.5)))
             ebayes = np.maximum(this_beta**2 - this_se**2, 1e-10)
             raw_means = this_beta / (1. + this_se**2/ebayes**2)
-            maxes[p] = np.max(probs*raw_means)**2
-            mins[p] = np.nanpercentile(betas[p, betas[p, :]**2 > 0]**2, 2.5)
+            maxes[population] = np.max(probs*raw_means)**2
+            mins[population] = np.nanpercentile(
+                betas[population, betas[population, :]**2 > 0]**2,
+                2.5
+            )
 
     cross_pop_covs = _make_simple(num_pops, num_components, mins, maxes)
 
@@ -226,63 +229,69 @@ def _main():
             output=args.output,
             scaled=args.scaled,
             scale_se=args.scale_se,
-            gwas_N=gwas_N,
+            gwas_N=gwas_n,
             init_hg=init_hg,
             num_its=args.num_its,
         )
     params = elbo.optimize()
     np.savez(args.output, **dict(zip(elbo.param_names, params)))
-    for n, p in zip(names, elbo._real_posterior_mean(*params)):
-        variants['posterior_' + n] = p
+    for name, posterior in zip(names, elbo.real_posterior_mean(*params)):
+        variants['posterior_' + name] = posterior
 
     variants.to_csv(args.output + '.estimates.tsv', sep='\t', index=False)
 
 
-def _make_diag_vals(P, K, mins, maxes):
+def _make_diag_vals(num_pops, num_components, mins, maxes):
     diag_vals = []
     # include something that's basically zero
     diag_vals = [[m*1e-6 for m in mins]]
-    for k in range(K+1):
+    for k in range(num_components+1):
         this_diag = []
-        for p in range(P):
-            this_diag.append(mins[p]
-                             * np.exp(np.log(maxes[p]/mins[p]) / K * k))
+        for population in range(num_pops):
+            this_diag.append(
+                mins[population]
+                * np.exp(np.log(maxes[population]/mins[population])
+                         / num_components * k)
+            )
         diag_vals.append(this_diag)
     return diag_vals
 
 
-def _make_simple(P, K, mins, maxes):
+def _make_simple(num_pops, num_components, mins, maxes):
     cross_pop_covs = []
-    diag_vals = _make_diag_vals(P, K, mins, maxes)
-    if P == 1:
-        return list(np.array(diag_vals).reshape((K+2, P, P)))
-    corr_vals = [-.99 + 1.98 * (k + 1) / K for k in range(K)]
+    diag_vals = _make_diag_vals(num_pops, num_components, mins, maxes)
+    if num_pops == 1:
+        return list(np.array(diag_vals).reshape((num_components+2,
+                                                 num_pops,
+                                                 num_pops)))
+    corr_vals = [-.99 + 1.98 * (k + 1) / num_components
+                 for k in range(num_components)]
     for idx, diag in enumerate(diag_vals):
-        for off_diags in itertools.product(*[corr_vals]*((P*(P-1))//2)):
-            mat = np.eye(P)
+        for off_diags in itertools.product(
+              *[corr_vals]*((num_pops*(num_pops-1))//2)):
+            mat = np.eye(num_pops)
             mat[np.triu_indices_from(mat, k=1)] = off_diags
             mat.T[np.triu_indices_from(mat, k=1)] = off_diags
             mat = mat * np.sqrt(diag)
             mat = mat.T * np.sqrt(diag)
-            for k in range(3):
+            for _ in range(3):
                 scale = np.diag(
-                    np.sqrt(np.exp(np.random.uniform(-1, 1, P)))
+                    np.sqrt(np.exp(np.random.uniform(-1, 1, num_pops)))
                 )
                 cross_pop_covs.append(scale.dot(mat.dot(scale)))
         if idx > 0:
             # does population specific causals
             # correlation does not really matter
-            for p in range(P):
+            for population in range(num_pops):
                 single_pop = np.copy(diag_vals[0])
-                single_pop[p] = diag[p]
+                single_pop[population] = diag[population]
                 mat = np.diag(single_pop)
-                for k in range(3):
+                for _ in range(3):
                     scale = np.diag(
-                        np.sqrt(np.exp(np.random.uniform(-1, 1, P)))
+                        np.sqrt(np.exp(np.random.uniform(-1, 1, num_pops)))
                     )
                     cross_pop_covs.append(scale.dot(mat.dot(scale)))
 
-    signs, _ = np.linalg.slogdet(cross_pop_covs)
     return cross_pop_covs
 
 

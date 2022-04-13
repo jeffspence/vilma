@@ -531,12 +531,12 @@ class Nat_grad_optimizer(object):
         num_its = 0
         L = np.ones(5)
         checkpoint_params = params
-        post_mean = self._real_posterior_mean(*params)
-        ckp_post_mean = self._real_posterior_mean(*checkpoint_params)
+        post_mean = self.real_posterior_mean(*params)
+        ckp_post_mean = self.real_posterior_mean(*checkpoint_params)
         while num_its < self.num_its and not converged:
             if num_its % self.checkpoint_freq == 0 and self.checkpoint:
                 checkpoint_params = params
-                ckp_post_mean = self._real_posterior_mean(*checkpoint_params)
+                ckp_post_mean = self.real_posterior_mean(*checkpoint_params)
                 fname = '{}.{}'.format(self.checkpoint_path, num_its)
                 dump_dict = dict(zip(self.param_names, params))
                 dump_dict['marginal'] = self.marginal_effects,
@@ -549,7 +549,7 @@ class Nat_grad_optimizer(object):
                 running_elbo_delta=running_elbo_delta
             )
 
-            new_post_mean = self._real_posterior_mean(*new_params)
+            new_post_mean = self.real_posterior_mean(*new_params)
 
             converged = np.allclose(new_post_mean, post_mean, atol=ABS_TOL,
                                     rtol=REL_TOL)
@@ -846,7 +846,7 @@ class MultiPopVI(Nat_grad_optimizer):
                               - self.vi_sigma_log_det.T
                               + self.vi_sigma_matches)
 
-    def _real_posterior_mean(self, vi_mu, vi_delta, hyper_delta):
+    def real_posterior_mean(self, vi_mu, vi_delta, hyper_delta):
         return self._fast_einsum('kpi,ik,pi->pi',
                                  vi_mu,
                                  vi_delta,
