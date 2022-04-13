@@ -248,6 +248,7 @@ def _main():
 
 
 def _make_diag_vals(num_pops, num_components, mins, maxes):
+    """Build a grid of variances across the populations"""
     diag_vals = []
     # include something that's basically zero
     diag_vals = [[m*1e-6 for m in mins]]
@@ -264,6 +265,7 @@ def _make_diag_vals(num_pops, num_components, mins, maxes):
 
 
 def _make_simple(num_pops, num_components, mins, maxes):
+    """Build a grid of covariance matrices"""
     cross_pop_covs = []
     diag_vals = _make_diag_vals(num_pops, num_components, mins, maxes)
     if num_pops == 1:

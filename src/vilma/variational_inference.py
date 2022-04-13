@@ -1,342 +1,29 @@
+"""
+Variational Inference engine to optimize ELBos
+
+Contains a parent class for any VI scheme and an implementation of the
+multi-population VI scheme.
+
+Classes:
+    VIScheme: Parent class for any VI scheme. front_end.py assumes
+        that any VI implementation will subclass VIScheme
+    MultiPopVI: Main implementation of Vilma VI scheme.
+"""
 import logging
 import numpy as np
-from numba import njit, prange
-
-L_MAX = 1e12
-REL_TOL = 1e-6
-ABS_TOL = 1e-6
-ELBO_TOL = 0.1
-EM_TOL = 10
-MAX_GRAD = 100
-EPSILON = 1e-100
-ELBO_MOMENTUM = 0.5
-NUM_BIG_PASSES = 10
+from vilma import numerics
 
 
-@njit('float64[:, :, :](float64[:, :, :], float64[:, :, :], float64)',
-      parallel=True, cache=True)
-def _sum_betas(old_beta, new_beta, step_size):
-    return step_size * new_beta + (1.-step_size) * old_beta
+L_MAX = 1e12        # sets minimum natural gradient stepsize is 1/L_MAX
+REL_TOL = 1e-6      # relative change convergence criterion for optimization
+ABS_TOL = 1e-6      # absolute change convergence criterion for optimization
+ELBO_TOL = 0.1      # ELBo change convergence criterion for optimization
+EM_TOL = 10         # ELBo change threshold for updating error scaling
+MAX_GRAD = 100      # Truncate gradient coordinates larger than MAX_GRAD
+ELBO_MOMENTUM = 0.5     # Smoothing parameter for assessing ELBo changes
 
 
-@njit('float64[:, :](float64[:, :], float64[:, :])', parallel=True, cache=True)
-def _fast_divide(x, y):
-    return x/y
-
-
-@njit('float64[:, :](float64[:, :], float64[:, :], float64[:, :],'
-      'float64[:, :])', parallel=True, cache=True)
-def _fast_linked_ests(linked_ests, std_errs, post_mean, scaled_ld_diags):
-    return linked_ests / std_errs - scaled_ld_diags * post_mean
-
-
-@njit('float64(float64[:, :], float64[:, :], float64[:, :], float64[:, :],'
-      'float64[:, :],'
-      'float64[:, :], float64[:], float64[:], float64[:])',
-      parallel=True, cache=True)
-def _fast_likelihood(post_means, post_vars, scaled_mu, scaled_ld_diags,
-                     linked_ests,
-                     adj_marginal, chi_stat, ld_ranks, error_scaling):
-    likelihood = np.zeros(post_means.shape[0])
-    for i in prange(post_means.shape[1]):
-        likelihood += (-0.5 * (scaled_ld_diags[:, i] * post_vars[:, i]
-                               + linked_ests[:, i] * scaled_mu[:, i])
-                       + post_means[:, i] * adj_marginal[:, i])
-    likelihood += -0.5 * chi_stat
-    return (likelihood/error_scaling
-            - 0.5 * ld_ranks * np.log(error_scaling)).sum()
-
-
-@njit('float64[:, :](float64[:, :], float64[:, :], float64)',
-      parallel=True, cache=True)
-def _sum_deltas(old_delta, new_delta, step_size):
-    return step_size * new_delta + (1.-step_size) * old_delta
-
-
-@njit('float64[:, :](float64[:, :, :], float64[:, :])',
-      parallel=True, cache=True)
-def _fast_posterior_mean(vi_mu, vi_delta):
-    to_return = np.zeros((vi_mu.shape[1], vi_mu.shape[2]))
-    for i in prange(vi_mu.shape[2]):
-        for p in range(vi_mu.shape[1]):
-            to_return[p, i] += (vi_mu[:, p, i] * vi_delta[i, :]).sum()
-    return to_return
-
-
-@njit('float64[:, :](float64[:, :], float64[:, :, :], float64[:, :],'
-      'float64[:, :, :])', parallel=True, cache=True)
-def _fast_pmv(mean, vi_mu, vi_delta, temp):
-    second_moment = _fast_posterior_mean(temp + vi_mu**2, vi_delta)
-    return second_moment - mean**2
-
-
-@njit('float64[:, :, :](float64[:, :, :], float64[:, :, :, :])',
-      parallel=True, cache=True)
-def _fast_nat_inner_product_m2(vi_mu, nat_sigma):
-    to_return = np.empty_like(vi_mu)
-    for i in prange(vi_mu.shape[2]):
-        for p in range(vi_mu.shape[1]):
-            for s in range(vi_mu.shape[0]):
-                this_summand = 0.
-                for q in range(vi_mu.shape[1]):
-                    this_summand += nat_sigma[s, p, q, i] * vi_mu[s, q, i]
-                to_return[s, p, i] = -2 * this_summand
-    return to_return
-
-
-@njit('float64[:, :, :](float64[:, :, :], float64[:, :, :, :])',
-      parallel=True, cache=True)
-def _fast_nat_inner_product(vi_mu, nat_sigma):
-    to_return = np.empty_like(vi_mu)
-    for i in prange(vi_mu.shape[2]):
-        for p in range(vi_mu.shape[1]):
-            for s in range(vi_mu.shape[0]):
-                this_summand = 0.
-                for q in range(vi_mu.shape[1]):
-                    this_summand += nat_sigma[s, p, q, i] * vi_mu[s, q, i]
-                to_return[s, p, i] = this_summand
-    return to_return
-
-
-@njit('float64(float64[:, :, :], float64[:, :, :, :], float64[:, :])',
-      parallel=True, cache=True)
-def _fast_inner_product_comp(vi_mu, mixture_prec, vi_delta):
-    to_return = 0.
-    for i in prange(vi_delta.shape[0]):
-        for k in range(vi_delta.shape[1]):
-            this_summand = 0.
-            for p in range(vi_mu.shape[1]):
-                for q in range(vi_mu.shape[1]):
-                    this_summand += (vi_mu[k, p, i]
-                                     * vi_mu[k, q, i]
-                                     * mixture_prec[k, q, p, 0])
-            this_summand *= vi_delta[i, k]
-            to_return += this_summand
-    return 0.5 * to_return
-
-
-@njit('float64[:, :](float64[:, :], int64[:], int64)',
-      parallel=True, cache=True)
-def _sum_annotations(deltas, annotations, num_annotations):
-    to_return = np.zeros((num_annotations, deltas.shape[1]))
-    for a in range(num_annotations):
-        summand = np.zeros(deltas.shape[1], dtype=np.float64)
-        for i in prange(annotations.shape[0]):
-            if annotations[i] == a:
-                summand += deltas[i]
-        to_return[a] += summand
-    return to_return
-
-
-@njit('float64(float64[:, :], float64[:, :], int64[:])',
-      parallel=True, cache=True)
-def _fast_delta_kl(vi_delta, hyper_delta, annotations):
-    log_hyper = np.log(hyper_delta)
-    to_return = 0.
-    for i in prange(vi_delta.shape[0]):
-        to_return += (vi_delta[i] * (np.log(vi_delta[i])
-                                     - log_hyper[annotations[i]])).sum()
-    return to_return
-
-
-@njit('float64(float64[:, :], float64[:, :])', parallel=True, cache=True)
-def _fast_beta_kl(sigma_summary, vi_delta):
-    return 0.5 * (sigma_summary * vi_delta).sum()
-
-
-@njit('float64[:, :](float64[:, :], float64[:], int64[:])',
-      parallel=True, cache=True)
-def _fast_vi_delta_grad(hyper_delta, log_det, annotations):
-    to_return = np.empty((annotations.shape[0],
-                          hyper_delta.shape[1]-1))
-    log_hyper = np.log(hyper_delta)
-    scaled_sizes = -0.5*(log_det)
-    for i in prange(to_return.shape[0]):
-        last = (log_hyper[annotations[i], -1]
-                + scaled_sizes[-1])
-        for k in range(to_return.shape[1]):
-            this = (log_hyper[annotations[i], k]
-                    + scaled_sizes[k])
-            to_return[i, k] = this - last
-    return to_return
-
-
-@njit('float64[:, :](float64[:, :])', parallel=True, cache=True)
-def _map_to_nat_cat_2D(probs):
-    to_return = np.zeros((probs.shape[0], probs.shape[1] - 1))
-    K = probs.shape[1]
-    for i in prange(probs.shape[0]):
-        last = np.log(probs[i, -1])
-        for k in range(K-1):
-            to_return[i, k] = np.log(probs[i, k]) - last
-    return to_return
-
-
-@njit('float64[:, :](float64[:, :])', cache=True)
-def _get_const_part(vi_log_det):
-    return np.copy(vi_log_det.T)
-
-
-@njit('float64[:, :](float64[:, :, :], float64[:, :, :],'
-      'float64[:, :], float64[:, :])', parallel=True, cache=True)
-def _fast_map_to_nat_vi_delta(vi_mu, old_nat_mu, const_part, vi_delta):
-    old_nat_vi_delta = _map_to_nat_cat_2D(vi_delta)
-    K = vi_mu.shape[0]
-    for i in prange(old_nat_vi_delta.shape[0]):
-        last = const_part[i, K-1]
-        for j in range(old_nat_mu.shape[1]):
-            last += vi_mu[K-1, j, i] * old_nat_mu[K-1, j, i]
-        for k in range(K-1):
-            this_addenda = const_part[i, k]
-            for j in range(old_nat_mu.shape[1]):
-                this_addenda += vi_mu[k, j, i] * old_nat_mu[k, j, i]
-            old_nat_vi_delta[i, k] += -0.5 * (this_addenda - last)
-    return old_nat_vi_delta
-
-
-@njit('float64[:, :](float64[:, :])', parallel=True, cache=True)
-def _invert_nat_cat_2D(probs):
-    to_return = np.empty((probs.shape[0], probs.shape[1] + 1))
-    for i in prange(to_return.shape[0]):
-        max_p = np.maximum(np.max(probs[i]), 0)
-        last_p = np.exp(-max_p)
-        denom = last_p
-        this_p = np.empty(probs.shape[1])
-        for k in range(this_p.shape[0]):
-            this = np.exp(probs[i, k] - max_p)
-            this_p[k] = this
-            denom += this
-        for k in range(this_p.shape[0]):
-            to_return[i, k] = np.maximum(this_p[k]/denom, EPSILON)
-        to_return[i, -1] = np.maximum(last_p / denom, EPSILON)
-    return to_return
-
-
-@njit('float64[:, :](float64[:, :, :], float64[:, :, :], float64[:, :],'
-      'float64[:, :])', parallel=True, cache=True)
-def _fast_invert_nat_vi_delta(new_mu, nat_mu, const_part, nat_vi_delta):
-    to_invert = np.empty_like(nat_vi_delta)
-    for i in prange(to_invert.shape[0]):
-        last = const_part[i, -1]
-        for j in range(nat_mu.shape[1]):
-            last += new_mu[-1, j, i] * nat_mu[-1, j, i]
-        for k in range(to_invert.shape[1]):
-            this_addenda = const_part[i, k]
-            for j in range(nat_mu.shape[1]):
-                this_addenda += new_mu[k, j, i] * nat_mu[k, j, i]
-            to_invert[i, k] = (0.5*(this_addenda - last)
-                               + nat_vi_delta[i, k])
-    return _invert_nat_cat_2D(to_invert)
-
-
-@njit('float64[:, :, :, :](float64[:, :, :, :])', parallel=True, cache=True)
-def _matrix_invert_4d_numba(matrix):
-    if matrix.shape[-1] == 0:
-        return np.zeros_like(matrix)
-    if matrix.shape[-1] == 1:
-        return 1. / matrix
-    if matrix.shape[-1] == 2:
-        matrix = np.transpose(matrix, (3, 2, 1, 0))
-        to_return = np.empty_like(matrix)
-        det = 1. / (matrix[0, 0, :, :] * matrix[1, 1, :, :]
-                    - matrix[0, 1, :, :] * matrix[1, 0, :, :])
-        to_return[0, 0, :, :] = matrix[1, 1, :, :] * det
-        to_return[1, 1, :, :] = matrix[0, 0, :, :] * det
-        to_return[0, 1, :, :] = -matrix[0, 1, :, :] * det
-        to_return[1, 0, :, :] = to_return[0, 1, :, :]
-        return np.transpose(to_return, (3, 2, 1, 0))
-    else:
-        return np.full_like(matrix, np.nan)
-
-
-@njit('float64[:, :, :](float64[:, :, :])', parallel=True, cache=True)
-def _matrix_invert_3d_numba(matrix):
-    if matrix.shape[-1] == 0:
-        return np.zeros_like(matrix)
-    if matrix.shape[-1] == 1:
-        return 1. / matrix
-    if matrix.shape[-1] == 2:
-        matrix = np.transpose(matrix, (2, 1, 0))
-        to_return = np.empty_like(matrix)
-        det = 1. / (matrix[0, 0, :] * matrix[1, 1, :]
-                    - matrix[0, 1, :] * matrix[1, 0, :])
-        to_return[0, 0, :] = matrix[1, 1, :] * det
-        to_return[1, 1, :] = matrix[0, 0, :] * det
-        to_return[0, 1, :] = -matrix[0, 1, :] * det
-        to_return[1, 0, :] = to_return[0, 1, :]
-        return np.transpose(to_return, (2, 1, 0))
-    else:
-        return np.full_like(matrix, np.nan)
-
-
-def _matrix_invert(matrix):
-    if matrix.shape[-1] > 2:
-        return np.linalg.inv(matrix)
-    if len(matrix.shape) == 4:
-        return _matrix_invert_4d_numba(matrix)
-    if len(matrix.shape) == 3:
-        return _matrix_invert_3d_numba(matrix)
-    return np.linalg.inv(matrix)
-
-
-def _vi_sigma_inv(matrices):
-    # kpqi->ikpq
-    inv = _matrix_invert(
-        np.transpose(matrices, (3, 0, 1, 2))
-    )
-    # ikpq->kpqi
-    return np.transpose(inv, (1, 2, 3, 0))
-
-
-@njit('float64[:, :](float64[:, :, :, :])', parallel=True, cache=True)
-def _matrix_log_det_4d_numba(matrix):
-    if matrix.shape[-1] == 0:
-        return np.zeros((matrix.shape[0], matrix.shape[1]))
-    if matrix.shape[-1] == 1:
-        return np.log(matrix[:, :, 0, 0])
-    if matrix.shape[-1] == 2:
-        matrix = np.transpose(matrix, (3, 2, 0, 1))
-        det = (matrix[0, 0, :, :] * matrix[1, 1, :, :]
-               - matrix[0, 1, :, :] * matrix[1, 0, :, :])
-        return np.log(det)
-    else:
-        return np.full((matrix.shape[0], matrix.shape[1]), np.nan)
-
-
-@njit('float64[:](float64[:, :, :])', parallel=True, cache=True)
-def _matrix_log_det_3d_numba(matrix):
-    if matrix.shape[-1] == 0:
-        return np.zeros(matrix.shape[0])
-    if matrix.shape[-1] == 1:
-        return np.log(matrix[:, 0, 0])
-    if matrix.shape[-1] == 2:
-        matrix = np.transpose(matrix, (2, 1, 0))
-        det = (matrix[0, 0, :] * matrix[1, 1, :]
-               - matrix[0, 1, :] * matrix[1, 0, :])
-        return np.log(det)
-    else:
-        return np.full(matrix.shape[0], np.nan)
-
-
-def _matrix_log_det(matrix):
-    if matrix.shape[-1] > 2:
-        return np.linalg.slogdet(matrix)[1]
-    if len(matrix.shape) == 4:
-        return _matrix_log_det_4d_numba(matrix)
-    if len(matrix.shape) == 3:
-        return _matrix_log_det_3d_numba(matrix)
-
-
-def _vi_sigma_log_det(matrices):
-    # kpqi->ikpq
-    log_det = _matrix_log_det(
-        np.transpose(matrices, (3, 0, 1, 2))
-    )
-    # ik->ki
-    return np.transpose(log_det)
-
-
-class Nat_grad_optimizer(object):
+class VIScheme():
 
     def __init__(self,
                  marginal_effects=None,
@@ -397,11 +84,11 @@ class Nat_grad_optimizer(object):
         self.marginal_effects = np.copy(marginal_effects)
         if self.scaled:
             self.marginal_effects = self.marginal_effects / (std_errs +
-                                                             EPSILON)
+                                                             numerics.EPSILON)
         # self.marginal_effects.flags.writeable = False
         if self.scaled:
             self.std_errs = np.ones_like(std_errs)
-            self.scalings = (std_errs + EPSILON)
+            self.scalings = (std_errs + numerics.EPSILON)
         else:
             self.std_errs = np.copy(std_errs)
             self.scalings = np.ones_like(std_errs)
@@ -649,7 +336,7 @@ class Nat_grad_optimizer(object):
         post_means = self._posterior_mean(*params)
         post_vars = self._posterior_marginal_variance(post_means, *params)
         linked_ests = np.empty_like(post_means)
-        scaled_mu = _fast_divide(post_means, self.std_errs)
+        scaled_mu = numerics.fast_divide(post_means, self.std_errs)
         for p in range(self.num_pops):
             linked_ests[p] = self.ld_mats[p].dot(scaled_mu[p])
             # this_like = -0.5 * (self.ld_diags[p] * post_vars[p]
@@ -662,15 +349,15 @@ class Nat_grad_optimizer(object):
             #               * np.log(self.error_scaling[p]))
             # this_like += (-0.5 * self.chi_stat[p] / self.error_scaling[p])
             # to_return += this_like
-        to_return = _fast_likelihood(post_means,
-                                     post_vars,
-                                     scaled_mu,
-                                     self.scaled_ld_diags,
-                                     linked_ests,
-                                     self.adj_marginal_effects,
-                                     self.chi_stat,
-                                     self.ld_ranks,
-                                     self.error_scaling)
+        to_return = numerics.fast_likelihood(post_means,
+                                             post_vars,
+                                             scaled_mu,
+                                             self.scaled_ld_diags,
+                                             linked_ests,
+                                             self.adj_marginal_effects,
+                                             self.chi_stat,
+                                             self.ld_ranks,
+                                             self.error_scaling)
         return to_return
 
     def _update_error_scaling(self, params):
@@ -698,7 +385,7 @@ class Nat_grad_optimizer(object):
         return -self._annotation_KL(*params)
 
 
-class MultiPopVI(Nat_grad_optimizer):
+class MultiPopVI(VIScheme):
     def __init__(self, mixture_covs=None,
                  num_random=0, **kwargs):
         num_pops = kwargs['marginal_effects'].shape[0]
@@ -708,15 +395,15 @@ class MultiPopVI(Nat_grad_optimizer):
         assert np.all(signs == 1)
 
         self.num_mix = len(mixture_covs)
-        Nat_grad_optimizer.__init__(self,
-                                    mixture_covs=mixture_covs,
-                                    **kwargs)
+        VIScheme.__init__(self,
+                          mixture_covs=mixture_covs,
+                          **kwargs)
         self.param_names = ['vi_mu', 'vi_delta', 'hyper_delta']
 
         # get out precision matrices
         new_mixture_covs = np.array(mixture_covs)[:, :, :, None]
-        self.mixture_prec = _vi_sigma_inv(new_mixture_covs)
-        self.log_det = _vi_sigma_log_det(new_mixture_covs)
+        self.mixture_prec = numerics.vi_sigma_inv(new_mixture_covs)
+        self.log_det = numerics.vi_sigma_log_det(new_mixture_covs)
 
         self.log_det = np.copy(self.log_det[:, 0])
 
@@ -729,9 +416,9 @@ class MultiPopVI(Nat_grad_optimizer):
                   np.arange(self.num_pops),
                   :] = (self.std_errs ** -2 * self.ld_diags)
         variances += self.mixture_prec
-        self.vi_sigma = _vi_sigma_inv(variances)
+        self.vi_sigma = numerics.vi_sigma_inv(variances)
         self.nat_sigma = -0.5 * variances
-        self.vi_sigma_log_det = _vi_sigma_log_det(self.vi_sigma)
+        self.vi_sigma_log_det = numerics.vi_sigma_log_det(self.vi_sigma)
         self.vi_sigma_matches = self._fast_einsum('kpqd,kqpi->ik',
                                                   self.mixture_prec,
                                                   self.vi_sigma,
@@ -743,12 +430,12 @@ class MultiPopVI(Nat_grad_optimizer):
 
     def _nat_to_not_vi_delta(self, params):
         vi_mu, vi_delta, hyper_delta = params
-        nat_mu = _fast_nat_inner_product_m2(vi_mu, self.nat_sigma)
-        const_part = _get_const_part(self.vi_sigma_log_det)
-        vi_delta = _fast_invert_nat_vi_delta(vi_mu,
-                                             nat_mu,
-                                             const_part,
-                                             self.nat_grad_vi_delta)
+        nat_mu = numerics.fast_nat_inner_product_m2(vi_mu, self.nat_sigma)
+        const_part = np.copy(self.vi_sigma_log_det.T)
+        vi_delta = numerics.fast_invert_nat_vi_delta(vi_mu,
+                                                     nat_mu,
+                                                     const_part,
+                                                     self.nat_grad_vi_delta)
         return vi_mu, vi_delta, hyper_delta
 
     def _initialize(self):
@@ -773,39 +460,37 @@ class MultiPopVI(Nat_grad_optimizer):
         probs -= self.log_det
         probs = np.exp(-0.5 * (probs - np.min(probs, axis=1, keepdims=True)))
         vi_delta = np.maximum(probs / probs.sum(axis=1, keepdims=True),
-                              EPSILON)
-        real_hyper_delta = _sum_annotations(vi_delta,
-                                            self.annotations,
-                                            self.num_annotations)
-        # new addition:
+                              numerics.EPSILON)
+        real_hyper_delta = numerics.sum_annotations(
+            vi_delta,
+            self.annotations,
+            self.num_annotations
+        )
         real_hyper_delta += 1. / self.num_loci
-        # done
         real_hyper_delta /= np.sum(real_hyper_delta, axis=1, keepdims=True)
-        real_hyper_delta = np.maximum(real_hyper_delta, EPSILON)
+        real_hyper_delta = np.maximum(real_hyper_delta, numerics.EPSILON)
 
         vi_mu = np.einsum('k,pi->kpi',
                           np.ones(self.num_mix),
                           fake_mu)
 
-        # new additions:
-        nat_vi_delta = _fast_vi_delta_grad(
+        nat_vi_delta = numerics.fast_vi_delta_grad(
             real_hyper_delta,
             self.log_det,
             self.annotations
         )
         self.nat_grad_vi_delta = nat_vi_delta
-        const_part = _get_const_part(self.vi_sigma_log_det)
-        nat_mu = _fast_nat_inner_product_m2(vi_mu, self.nat_sigma)
-        vi_delta = _fast_invert_nat_vi_delta(vi_mu,
-                                             nat_mu,
-                                             const_part,
-                                             nat_vi_delta,)
-        # done
+        const_part = np.copy(self.vi_sigma_log_det.T)
+        nat_mu = numerics.fast_nat_inner_product_m2(vi_mu, self.nat_sigma)
+        vi_delta = numerics.fast_invert_nat_vi_delta(vi_mu,
+                                                     nat_mu,
+                                                     const_part,
+                                                     nat_vi_delta,)
 
         return vi_mu, vi_delta, real_hyper_delta
 
     def _update_error_scaling(self, params):
-        Nat_grad_optimizer._update_error_scaling(self, params)
+        VIScheme._update_error_scaling(self, params)
         variances = np.zeros((self.num_mix,
                               self.num_pops,
                               self.num_pops,
@@ -816,9 +501,9 @@ class MultiPopVI(Nat_grad_optimizer):
                   :] = (self.std_errs ** -2 * self.ld_diags
                         / self.error_scaling.reshape((-1, 1)))
         variances += self.mixture_prec
-        self.vi_sigma = _vi_sigma_inv(variances)
+        self.vi_sigma = numerics.vi_sigma_inv(variances)
         self.nat_sigma = -0.5 * variances
-        self.vi_sigma_log_det = _vi_sigma_log_det(self.vi_sigma)
+        self.vi_sigma_log_det = numerics.vi_sigma_log_det(self.vi_sigma)
         self.vi_sigma_matches = self._fast_einsum('kpqd,kqpi->ik',
                                                   self.mixture_prec,
                                                   self.vi_sigma,
@@ -835,7 +520,7 @@ class MultiPopVI(Nat_grad_optimizer):
                                  key='_real_posterior_mean1')
 
     def _posterior_mean(self, vi_mu, vi_delta, hyper_delta):
-        return _fast_posterior_mean(vi_mu, vi_delta)
+        return numerics.fast_posterior_mean(vi_mu, vi_delta)
         # return self._fast_einsum('kpi,ik->pi',
         #                          vi_mu,
         #                          vi_delta,
@@ -848,7 +533,7 @@ class MultiPopVI(Nat_grad_optimizer):
         #                                   temp + vi_mu**2,
         #                                   vi_delta,
         #                                   key='pmv2')
-        return _fast_pmv(mean, vi_mu, vi_delta, temp)
+        return numerics.fast_pmv(mean, vi_mu, vi_delta, temp)
 
     def _update_beta(self, vi_mu, vi_delta, hyper_delta, orig_obj, L,
                      idx, lsr):
@@ -858,8 +543,8 @@ class MultiPopVI(Nat_grad_optimizer):
         #                                     self.nat_sigma,
         #                                     vi_mu,
         #                                     key='_update_beta1')
-        old_nat_mu = _fast_nat_inner_product_m2(vi_mu, self.nat_sigma)
-        const_part = _get_const_part(self.vi_sigma_log_det)
+        old_nat_mu = numerics.fast_nat_inner_product_m2(vi_mu, self.nat_sigma)
+        const_part = np.copy(self.vi_sigma_log_det.T)
 
         assert self.nat_grad_vi_delta is not None
 
@@ -869,7 +554,7 @@ class MultiPopVI(Nat_grad_optimizer):
         while True:
             step_size = 1. / L[idx]
             # nat_mu = step_size * nat_grad_mu + (1. - step_size) * old_nat_mu
-            nat_mu = _sum_betas(old_nat_mu, nat_grad_mu, step_size)
+            nat_mu = numerics.sum_betas(old_nat_mu, nat_grad_mu, step_size)
             # nat_vi_delta = (step_size * nat_grad_vi_delta
             #                 + (1. - step_size) * old_nat_vi_delta)
             # nat_vi_delta = _sum_deltas(old_nat_vi_delta,
@@ -879,16 +564,18 @@ class MultiPopVI(Nat_grad_optimizer):
             #                            self.vi_sigma,
             #                            nat_mu,
             #                            key='_update_beta1')
-            new_mu = _fast_nat_inner_product(nat_mu, self.vi_sigma)
+            new_mu = numerics.fast_nat_inner_product(nat_mu, self.vi_sigma)
             # quad_forms = (new_mu * nat_mu).sum(axis=1)
             # nat_adj = -.5*(quad_forms.T + const_part)
             # nat_adj = nat_adj[:, :-1] - nat_adj[:, -1:]
             # new_vi_delta = _invert_nat_cat_2D(nat_vi_delta - nat_adj)
             # new_vi_delta = np.maximum(new_vi_delta, EPSILON)
-            new_vi_delta = _fast_invert_nat_vi_delta(new_mu,
-                                                     nat_mu,
-                                                     const_part,
-                                                     self.nat_grad_vi_delta)
+            new_vi_delta = numerics.fast_invert_nat_vi_delta(
+                new_mu,
+                nat_mu,
+                const_part,
+                self.nat_grad_vi_delta
+            )
             new_obj = self._beta_objective((new_mu, new_vi_delta, hyper_delta))
             logging.info('...Old objective = %f, new objective = %f',
                          orig_obj, new_obj)
@@ -909,13 +596,13 @@ class MultiPopVI(Nat_grad_optimizer):
         post_mean = self._posterior_mean(vi_mu, vi_delta, hyper_delta)
 
         linked_ests = np.zeros_like(post_mean)
-        post_zs = _fast_divide(post_mean, self.std_errs)
+        post_zs = numerics.fast_divide(post_mean, self.std_errs)
         for p in range(self.num_pops):
             linked_ests[p] = self.ld_mats[p].dot(post_zs[p, :])
-        linked_ests = _fast_linked_ests(linked_ests,
-                                        self.std_errs,
-                                        post_mean,
-                                        self.scaled_ld_diags)
+        linked_ests = numerics.fast_linked_ests(linked_ests,
+                                                self.std_errs,
+                                                post_mean,
+                                                self.scaled_ld_diags)
         nat_grad_mu = self._fast_einsum('p,pi,k->kpi',
                                         1./self.error_scaling,
                                         self.adj_marginal_effects-linked_ests,
@@ -933,20 +620,22 @@ class MultiPopVI(Nat_grad_optimizer):
             orig_obj = self.elbo(
                 (vi_mu, vi_delta, hyper_delta)
             )
-        new_hyper_delta = _sum_annotations(vi_delta,
-                                           self.annotations,
-                                           self.num_annotations)
+        new_hyper_delta = numerics.sum_annotations(
+            vi_delta,
+            self.annotations,
+            self.num_annotations
+        )
         new_hyper_delta = np.maximum(
             new_hyper_delta
-            / (self.annotation_counts.reshape((-1, 1)) + EPSILON),
-            EPSILON
+            / (self.annotation_counts.reshape((-1, 1)) + numerics.EPSILON),
+            numerics.EPSILON
         )
         new_hyper_delta /= new_hyper_delta.sum(axis=1, keepdims=True)
         # new_obj = self._hyper_delta_objective(
         #     (vi_mu, vi_delta, new_hyper_delta)
         # )
 
-        self.nat_grad_vi_delta = _fast_vi_delta_grad(
+        self.nat_grad_vi_delta = numerics.fast_vi_delta_grad(
             new_hyper_delta,
             self.log_det,
             self.annotations
@@ -972,17 +661,18 @@ class MultiPopVI(Nat_grad_optimizer):
                 hyper_delta), L, 0., 0.
 
     def _delta_KL(self, vi_mu, vi_delta, hyper_delta):
-        return _fast_delta_kl(vi_delta, hyper_delta,
-                              np.copy(self.annotations))
+        return numerics.fast_delta_kl(vi_delta, hyper_delta,
+                                      np.copy(self.annotations))
 
     def _beta_KL(self, vi_mu, vi_delta, hyper_delta):
-        delta_comp = _fast_delta_kl(vi_delta, hyper_delta,
-                                    np.copy(self.annotations))
-        inner_product_comp = _fast_inner_product_comp(vi_mu,
-                                                      self.mixture_prec,
-                                                      vi_delta)
-        # var_comp = 0.5 * (self.vi_sigma_matches * vi_delta).sum()
-        fast_comp = _fast_beta_kl(self.sigma_summary, vi_delta)
+        delta_comp = numerics.fast_delta_kl(vi_delta, hyper_delta,
+                                            np.copy(self.annotations))
+        inner_product_comp = numerics.fast_inner_product_comp(
+            vi_mu,
+            self.mixture_prec,
+            vi_delta
+        )
+        fast_comp = numerics.fast_beta_kl(self.sigma_summary, vi_delta)
 
         # beta_kl = (delta_comp + log_det_comp + dim_comp
         #            + inner_product_comp + var_comp)
