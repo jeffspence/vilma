@@ -7,6 +7,7 @@ from argparse import ArgumentParser
 import plinkio.plinkfile
 import numpy as np
 import pandas as pd
+from vilma import matrix_structures
 
 
 def _arguments():
@@ -20,6 +21,20 @@ def _arguments():
                         help='A file where each line is the basename of '
                              'plink format genotype data for a single '
                              'chromosome.')
+    parser.add_argument('-p', '--plink-file-list', required=True, type=str,
+                        help='A file where each line is the basename of '
+                             'plink format genotype data for a single '
+                             'chromosome.')
+    parser.add_argument('--extract', required=False, type=str, default='',
+                        help='A file with a column ID that specifies '
+                             'which SNPs to keep. If not specified '
+                             'all variants will be included.')
+    parser.add_argument('--ldthresh', required=False, type=float, default=-1,
+                        help='Threshold for computing SVD. If negative '
+                             'then no SVD is performed. If between 0 and 1 '
+                             'then setting to x guarantees that SNPs with '
+                             'r^2 greater than x will be linearly independent '
+                             'in the resulting decomposition.')
     return parser.parse_args()
 
 
@@ -47,13 +62,19 @@ def _get_ld_blocks(bedfile_name):
     return ld_table_dict
 
 
-def _process_blocks(blocked_data, outfile_name):
+def _process_blocks(blocked_data, outfile_name, ldthresh=-1):
     """Take genetic data and variant IDs, compute correlation and write"""
     outpath = outfile_name + '_{}:{}'
     var_outpath = outfile_name + '_{}:{}.var'
     legend = []
     for key in blocked_data:
         corrmat = blocked_data[key]['SNPs'].corr().to_numpy()
+        if ldthresh >= 0:
+            trunc_mat = matrix_structures.LowRankMatrix(X=corrmat,
+                                                        t=ldthresh)
+            corrmat = np.vstack([trunc_mat.u,
+                                 trunc_mat.s.reshape((1, -1)),
+                                 trunc_mat.v])
         np.save(outpath.format(*key.split()), corrmat)
         with open(var_outpath.format(*key.split()), 'w') as ofh:
             for var in blocked_data[key]['IDs']:
@@ -66,7 +87,7 @@ def _process_blocks(blocked_data, outfile_name):
         ofh.write('\n'.join(legend))
 
 
-def _assign_to_blocks(blocks, plink_data):
+def _assign_to_blocks(blocks, plink_data, variants=None, ldthresh=-1):
     """Pull genotype data from `plink_data` and assign SNPs to blocks"""
     blocked_data = {}
     blocked_ids = {}
@@ -80,6 +101,8 @@ def _assign_to_blocks(blocks, plink_data):
         if str(locus.chromosome) != chromosome:
             raise ValueError('Each plink file should contain exactly one '
                              'chromosome.')
+        if variants and locus.name not in variants:
+            continue
         block_idx = np.searchsorted(blocks[chromosome].start,
                                     locus.bp_position - 1,
                                     side='right') - 1
@@ -119,6 +142,16 @@ def _main():
     logging.info('Reading LD blocks from %s', args.b)
     ld_blocks = _get_ld_blocks(args.b)
 
+    variants = None
+    if args.extract:
+        logging.info('Loading Variants from', args.extract)
+        variants = pd.read_csv(args.extract,
+                               delim_whitespace=True,
+                               header=0)
+        if 'ID' not in variants.columns:
+            raise ValueError(args.extract + ' must contain '
+                             'a column labeled ID')
+            variants = set(variants['ID'])
     if os.path.exists(args.o + '.schema'):
         raise ValueError(args.o + 'schema already exists. '
                          'Please delete before running.')
@@ -131,7 +164,7 @@ def _main():
                 line.strip()
             )
             logging.info('...assigning SNPs to blocks')
-            blocked_data = _assign_to_blocks(ld_blocks, plink_data)
+            blocked_data = _assign_to_blocks(ld_blocks, plink_data, variants)
 
             logging.info('...processing LD blocks')
             _process_blocks(blocked_data, args.o)

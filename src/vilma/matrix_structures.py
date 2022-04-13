@@ -110,6 +110,11 @@ class LowRankMatrix():
                     or (D is None)):
                 raise ValueError('Need to provide either a matrix or '
                                  'an SVD decomposition')
+            keep = s >= 1 - np.sqrt(t)
+            u = u[:, keep]
+            s = s[keep]
+            v = v[keep, :]
+
         self.D = np.copy(D)
         keep = np.abs(s) > (1e-12 * np.max(np.abs(s)))
         if hdf_file is None:

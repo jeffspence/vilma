@@ -203,22 +203,50 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
                 if len(idx[~mismatch]) == 0:
                     continue
                 signs[flip] = -1
-                signs = np.outer(signs, signs)
                 ld_matrix = np.copy(np.load(ld_path))
                 if len(ld_matrix.shape) == 0:
                     ld_matrix = ld_matrix[None, None]
-                logger.info('Proportion of variant indices being used: %e',
-                            np.mean(variant_indices))
+                if ld_matrix.shape[0] == ld_matrix.shape[1]:
+                    logger.info('Proportion of variant indices being used: %e',
+                                np.mean(variant_indices))
 
-                accepted_matrix = np.copy(ld_matrix[np.ix_(variant_indices,
-                                                           variant_indices)])
-                accepted_matrix = accepted_matrix * signs
-                accepted_matrix = accepted_matrix[np.ix_(~mismatch,
-                                                         ~mismatch)]
-                perm.append(idx[~mismatch])
-                svds.append(
-                    LowRankMatrix(accepted_matrix, ldthresh, hdf_file=hdf_file)
-                )
+                    accepted_matrix = np.copy(
+                        ld_matrix[np.ix_(variant_indices, variant_indices)]
+                    )
+                    accepted_matrix = accepted_matrix * np.outer(signs, signs)
+                    accepted_matrix = accepted_matrix[np.ix_(~mismatch,
+                                                             ~mismatch)]
+                    perm.append(idx[~mismatch])
+                    svds.append(
+                        LowRankMatrix(accepted_matrix,
+                                      ldthresh,
+                                      hdf_file=hdf_file)
+                    )
+                else:
+                    if ld_matrix.shape[0] % 2 != 1:
+                        raise ValueError('Bad LD matrix.')
+                    num_snps = (ld_matrix.shape[0] - 1)//2
+                    num_components = ld_matrix.shape[1]
+                    if num_snps < num_components:
+                        raise ValueError('Bad LD matrix.')
+                    u_mat = np.copy(ld_matrix[0:num_snps])
+                    s_vec = np.copy(ld_matrix[num_snps])
+                    v_mat = np.copy(ld_matrix[(num_snps+1):])
+
+                    u_mat = signs.reshape((-1, 1)) * u_mat
+                    v_mat = signs.reshape((1, -1)) * v_mat
+
+                    u_mat = np.copy(u_mat[~mismatch])
+                    v_mat = np.copy(v_mat[:, ~mismatch])
+
+                    perm.append(idx[~mismatch])
+                    svds.append(
+                        LowRankMatrix(u=u_mat,
+                                      s=s_vec,
+                                      v=v_mat,
+                                      D=np.zeros(u_mat.shape[0]),
+                                      hdf_file=hdf_file)
+                    )
 
     # Need to add in variants that are not in the LD matrix
     # Set them to have massive variance
