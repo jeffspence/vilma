@@ -179,6 +179,7 @@ def _main():
     std_errs = np.concatenate(combined_errors, axis=0)
 
     logging.info('Building cross-population covariances...')
+    # First get out plausible maximum and minimum true effect sizes
     if args.scaled:
         maxes = np.nanmax((betas/std_errs)**2, axis=1)
         mins = np.zeros_like(maxes)
@@ -209,13 +210,15 @@ def _main():
                 2.5
             )
 
+    # build covariance matrices
     cross_pop_covs = _make_simple(num_pops, num_components, mins, maxes)
 
+    # save covariance matrices
     with open("%s.covariance.pkl" % args.output, "wb") as ofile:
         pickle.dump([cross_pop_covs], ofile)
 
+    # run optimization
     logging.info('Fitting...')
-
     if args.trait:
         raise NotImplementedError('--trait has not been implemented yet.')
     else:
@@ -234,10 +237,13 @@ def _main():
             num_its=args.num_its,
         )
     params = elbo.optimize()
+
+    # save model parameters
     np.savez(args.output, **dict(zip(elbo.param_names, params)))
+
+    # write posterior means in plink format
     for name, posterior in zip(names, elbo.real_posterior_mean(*params)):
         variants['posterior_' + name] = posterior
-
     variants.to_csv(args.output + '.estimates.tsv', sep='\t', index=False)
 
 
