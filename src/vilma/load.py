@@ -8,15 +8,12 @@ functions:
     load_ld_from_schema: Load a block LD matrix using a schema file
         and match to variants
 """
-
-from __future__ import division
-
-import numpy as np
-import pandas as pd
 import logging
 import sys
-import h5py
 from tempfile import TemporaryFile
+import numpy as np
+import pandas as pd
+import h5py
 from vilma.matrix_structures import LowRankMatrix
 from vilma.matrix_structures import BlockDiagonalMatrix
 
@@ -48,25 +45,25 @@ def load_annotations(annotations_filename, variants):
     if annotations_filename is None:
         return np.ones((variants.shape[0], 1)), []
 
-    df = pd.read_csv(annotations_filename,
-                     header=0,
-                     delim_whitespace=True)
+    dframe = pd.read_csv(annotations_filename,
+                         header=0,
+                         delim_whitespace=True)
 
-    if 'ID' not in df.columns:
+    if 'ID' not in dframe.columns:
         raise ValueError('Annotation file must contain a column labeled ID')
-    if 'ANNOTATION' not in df.columns:
+    if 'ANNOTATION' not in dframe.columns:
         raise ValueError('Annotation file must contain a column labeled '
                          'ANNOTATION')
 
-    df = pd.merge(variants, df, on='ID', how='left')
-    df = pd.DataFrame(df['ANNOTATION'])
+    dframe = pd.merge(variants, dframe, on='ID', how='left')
+    dframe = pd.DataFrame(dframe['ANNOTATION'])
     logging.info('%d out of %d total variants are missing annotations',
-                 df['ANNOTATION'].isna().sum(),
-                 df.shape[0])
+                 dframe['ANNOTATION'].isna().sum(),
+                 dframe.shape[0])
 
-    denylist = np.where(df['ANNOTATION'].isna())[0].tolist()
-    df.loc[df['ANNOTATION'].isna(), 'ANNOTATION'] = 0
-    return pd.get_dummies(df['ANNOTATION'],
+    denylist = np.where(dframe['ANNOTATION'].isna())[0].tolist()
+    dframe.loc[dframe['ANNOTATION'].isna(), 'ANNOTATION'] = 0
+    return pd.get_dummies(dframe['ANNOTATION'],
                           dummy_na=False).to_numpy(), denylist
 
 
@@ -119,7 +116,7 @@ def load_sumstats(sumstats_filename, variants):
     return sumstats, np.where(missing)[0].tolist()
 
 
-def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
+def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
     """
     Load block matrix using specified schema, and filter to variants.
 
@@ -128,7 +125,7 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
         variants: the set of variants at which we want LD
         denylist: Variants which should be treated as missing for the purposes
             of this LD matrix.
-        t: LD threshold for low rank approximations to the LD matrix. A
+        ldthresh: LD threshold for low rank approximations to the LD matrix. A
             threshold of t guarantees that SNPs with r^2 lower than t
             will be linearly independent.
         mmap: Boolean to indicate whether to store LD matrix on disk (may be
@@ -167,7 +164,7 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
 
             ld_shape = (snp_metadata.shape[0], snp_metadata.shape[0])
 
-            logger.info('LD matrix shape: %s' % (ld_shape,))
+            logger.info('LD matrix shape: %s', (ld_shape,))
 
             variant_indices = np.copy(
                 snp_metadata.ID.isin(variants.ID).to_numpy()
@@ -210,8 +207,8 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
                 ld_matrix = np.copy(np.load(ld_path))
                 if len(ld_matrix.shape) == 0:
                     ld_matrix = ld_matrix[None, None]
-                logger.info('Proportion of variant indices being used: %e'
-                            % np.mean(variant_indices))
+                logger.info('Proportion of variant indices being used: %e',
+                            np.mean(variant_indices))
 
                 accepted_matrix = np.copy(ld_matrix[np.ix_(variant_indices,
                                                            variant_indices)])
@@ -220,7 +217,7 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
                                                          ~mismatch)]
                 perm.append(idx[~mismatch])
                 svds.append(
-                    LowRankMatrix(accepted_matrix, t, hdf_file=hdf_file)
+                    LowRankMatrix(accepted_matrix, ldthresh, hdf_file=hdf_file)
                 )
 
     # Need to add in variants that are not in the LD matrix
@@ -241,6 +238,6 @@ def load_ld_from_schema(schema_path, variants, denylist, t, mmap=False):
         logger.info('The variants in the extract file and the variants in the '
                     'LD matrix were not in the same order.')
     perm = np.array(perm)
-    bm = BlockDiagonalMatrix(svds, perm=perm, missing=missing)
+    block_mat = BlockDiagonalMatrix(svds, perm=perm, missing=missing)
 
-    return bm
+    return block_mat

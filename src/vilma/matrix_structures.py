@@ -13,7 +13,7 @@ import numpy as np
 
 
 def _svd_threshold(matrix, ld_thresh):
-    """Perform SVD on X and truncate to keep large eigenvalues"""
+    """Perform SVD on matrix and truncate to keep large eigenvalues"""
     s_vals, vecs = np.linalg.eigh(matrix)
     big_sing_vals = np.where(s_vals >= 1 - np.sqrt(ld_thresh))[0]
     if len(big_sing_vals > 0):
