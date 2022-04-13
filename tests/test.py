@@ -509,7 +509,7 @@ def test_load_annotations():
                               variants)
     with raises(ValueError):
         load.load_annotations(
-            'test_data/bad_annotations_missing_annotation.tsv',
+            correct_path('bad_annotations_missing_annotation.tsv'),
             variants
         )
 
