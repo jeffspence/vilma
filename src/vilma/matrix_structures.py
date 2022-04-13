@@ -8,26 +8,24 @@ Classes:
     BlockDiagonalMatrix: A datastructure for storing symmetric block diagonal
         matrices
 """
-from __future__ import division
-
-import numpy as np
 import string
+import numpy as np
 
 
-def _svd_threshold(X, ld_thresh):
+def _svd_threshold(matrix, ld_thresh):
     """Perform SVD on X and truncate to keep large eigenvalues"""
-    s, vecs = np.linalg.eigh(X)
-    big_sing_vals = np.where(s >= 1 - np.sqrt(ld_thresh))[0]
+    s_vals, vecs = np.linalg.eigh(matrix)
+    big_sing_vals = np.where(s_vals >= 1 - np.sqrt(ld_thresh))[0]
     if len(big_sing_vals > 0):
         k = big_sing_vals
     else:
-        return (np.ones((X.shape[0], 1)),
+        return (np.ones((matrix.shape[0], 1)),
                 np.zeros(1),
-                np.ones((1, X.shape[1])))
-    u = np.copy(vecs[:, k])
-    s = np.copy(s[k])
-    v = np.copy(u.T)
-    return u, s, v
+                np.ones((1, matrix.shape[1])))
+    u_mat = np.copy(vecs[:, k])
+    s_vec = np.copy(s_vals[k])
+    v_mat = np.copy(u_mat.T)
+    return u_mat, s_vec, v_mat
 
 
 def _get_random_string():
@@ -37,7 +35,7 @@ def _get_random_string():
     )
 
 
-class LowRankMatrix(object):
+class LowRankMatrix():
     """
     A low rank plus diagonal representation of a symmetric matrix
 
@@ -207,7 +205,7 @@ class LowRankMatrix(object):
                                       'not yet been implemented.')
         return LowRankMatrix(u=self.u, s=self.s**power, v=self.v, D=self.D)
 
-    def get_rank(self, vector=None):
+    def get_rank(self):
         """Return the rank of this matrix"""
 
         # If D is zero, then we've just got the low rank component
@@ -224,14 +222,14 @@ class LowRankMatrix(object):
 
         # If D is not all zero or all positive, we have to reconstruct the
         # matrix
-        m = np.diag(self.D) + np.einsum('ik,k,kj->ij',
-                                        self.u,
-                                        self.s,
-                                        self.v)
-        return np.linalg.matrix_rank(m, hermitian=True)
+        mat = np.diag(self.D) + np.einsum('ik,k,kj->ij',
+                                          self.u,
+                                          self.s,
+                                          self.v)
+        return np.linalg.matrix_rank(mat, hermitian=True)
 
 
-class BlockDiagonalMatrix(object):
+class BlockDiagonalMatrix():
     """
     A symmetric block diagonal matrix, where blocks are low rank
 
