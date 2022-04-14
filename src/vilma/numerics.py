@@ -23,8 +23,9 @@ def fast_divide(x, y):
 
 @njit('float64[:, :](float64[:, :], float64[:, :], float64[:, :],'
       'float64[:, :])', parallel=True, cache=True)
-def fast_linked_ests(linked_ests, std_errs, post_mean, scaled_ld_diags):
-    return linked_ests / std_errs - scaled_ld_diags * post_mean
+def fast_linked_ests(w, x, y, z):
+    """Element-wise w/x + y*z"""
+    return w / x - y * z
 
 
 @njit('float64(float64[:, :], float64[:, :], float64[:, :], float64[:, :],'
@@ -34,6 +35,7 @@ def fast_linked_ests(linked_ests, std_errs, post_mean, scaled_ld_diags):
 def fast_likelihood(post_means, post_vars, scaled_mu, scaled_ld_diags,
                     linked_ests,
                     adj_marginal, chi_stat, ld_ranks, error_scaling):
+    """Compute the expected log likelihood"""
     likelihood = np.zeros(post_means.shape[0])
     for i in prange(post_means.shape[1]):
         likelihood += (-0.5 * (scaled_ld_diags[:, i] * post_vars[:, i]
@@ -44,15 +46,10 @@ def fast_likelihood(post_means, post_vars, scaled_mu, scaled_ld_diags,
             - 0.5 * ld_ranks * np.log(error_scaling)).sum()
 
 
-@njit('float64[:, :](float64[:, :], float64[:, :], float64)',
-      parallel=True, cache=True)
-def sum_deltas(old_delta, new_delta, step_size):
-    return step_size * new_delta + (1.-step_size) * old_delta
-
-
 @njit('float64[:, :](float64[:, :, :], float64[:, :])',
       parallel=True, cache=True)
 def fast_posterior_mean(vi_mu, vi_delta):
+    """Compute the average of vi_mu weighted by vi_delta"""
     to_return = np.zeros((vi_mu.shape[1], vi_mu.shape[2]))
     for i in prange(vi_mu.shape[2]):
         for p in range(vi_mu.shape[1]):
@@ -63,6 +60,7 @@ def fast_posterior_mean(vi_mu, vi_delta):
 @njit('float64[:, :](float64[:, :], float64[:, :, :], float64[:, :],'
       'float64[:, :, :])', parallel=True, cache=True)
 def fast_pmv(mean, vi_mu, vi_delta, temp):
+    """Compute the posterior marginal variance"""
     second_moment = fast_posterior_mean(temp + vi_mu**2, vi_delta)
     return second_moment - mean**2
 
@@ -70,6 +68,7 @@ def fast_pmv(mean, vi_mu, vi_delta, temp):
 @njit('float64[:, :, :](float64[:, :, :], float64[:, :, :, :])',
       parallel=True, cache=True)
 def fast_nat_inner_product_m2(vi_mu, nat_sigma):
+    """Compute -2 times 'sqi,spqi->spi' of vi_mu, nat_sigma"""
     to_return = np.empty_like(vi_mu)
     for i in prange(vi_mu.shape[2]):
         for p in range(vi_mu.shape[1]):
@@ -84,6 +83,7 @@ def fast_nat_inner_product_m2(vi_mu, nat_sigma):
 @njit('float64[:, :, :](float64[:, :, :], float64[:, :, :, :])',
       parallel=True, cache=True)
 def fast_nat_inner_product(vi_mu, nat_sigma):
+    """Compute 'sqi,spqi->spi' of vi_mu, nat_sigma"""
     to_return = np.empty_like(vi_mu)
     for i in prange(vi_mu.shape[2]):
         for p in range(vi_mu.shape[1]):
@@ -98,6 +98,9 @@ def fast_nat_inner_product(vi_mu, nat_sigma):
 @njit('float64(float64[:, :, :], float64[:, :, :, :], float64[:, :])',
       parallel=True, cache=True)
 def fast_inner_product_comp(vi_mu, mixture_prec, vi_delta):
+    """Half 'kpi,kqi,kpqd,ik->' for vi_mu, vi_mu, mixture_prec, vi_delta"""
+    if mixture_prec.shape[-1] != 1:
+        raise ValueError('mixture_prec must be 1 dimensional along last mode.')
     to_return = 0.
     for i in prange(vi_delta.shape[0]):
         for k in range(vi_delta.shape[1]):
@@ -115,6 +118,7 @@ def fast_inner_product_comp(vi_mu, mixture_prec, vi_delta):
 @njit('float64[:, :](float64[:, :], int64[:], int64)',
       parallel=True, cache=True)
 def sum_annotations(deltas, annotations, num_annotations):
+    """Compute vector sum of deltas with the same annotations"""
     to_return = np.zeros((num_annotations, deltas.shape[1]))
     for a in range(num_annotations):
         summand = np.zeros(deltas.shape[1], dtype=np.float64)
@@ -128,6 +132,7 @@ def sum_annotations(deltas, annotations, num_annotations):
 @njit('float64(float64[:, :], float64[:, :], int64[:])',
       parallel=True, cache=True)
 def fast_delta_kl(vi_delta, hyper_delta, annotations):
+    """Compute sum vi_delta[i]*log(vi_delta[i]/hyper_delta[annotations[i]])"""
     log_hyper = np.log(hyper_delta)
     to_return = 0.
     for i in prange(vi_delta.shape[0]):
@@ -144,6 +149,7 @@ def fast_beta_kl(sigma_summary, vi_delta):
 @njit('float64[:, :](float64[:, :], float64[:], int64[:])',
       parallel=True, cache=True)
 def fast_vi_delta_grad(hyper_delta, log_det, annotations):
+    """Computes the natural gradient of the VI delta parameter"""
     to_return = np.empty((annotations.shape[0],
                           hyper_delta.shape[1]-1))
     log_hyper = np.log(hyper_delta)
@@ -160,6 +166,7 @@ def fast_vi_delta_grad(hyper_delta, log_det, annotations):
 
 @njit('float64[:, :](float64[:, :])', parallel=True, cache=True)
 def map_to_nat_cat_2D(probs):
+    """Compute log(probs[i] / probs[-1]) for all but last element"""
     to_return = np.zeros((probs.shape[0], probs.shape[1] - 1))
     K = probs.shape[1]
     for i in prange(probs.shape[0]):
@@ -169,25 +176,9 @@ def map_to_nat_cat_2D(probs):
     return to_return
 
 
-@njit('float64[:, :](float64[:, :, :], float64[:, :, :],'
-      'float64[:, :], float64[:, :])', parallel=True, cache=True)
-def fast_map_to_nat_vi_delta(vi_mu, old_nat_mu, const_part, vi_delta):
-    old_nat_vi_delta = map_to_nat_cat_2D(vi_delta)
-    K = vi_mu.shape[0]
-    for i in prange(old_nat_vi_delta.shape[0]):
-        last = const_part[i, K-1]
-        for j in range(old_nat_mu.shape[1]):
-            last += vi_mu[K-1, j, i] * old_nat_mu[K-1, j, i]
-        for k in range(K-1):
-            this_addenda = const_part[i, k]
-            for j in range(old_nat_mu.shape[1]):
-                this_addenda += vi_mu[k, j, i] * old_nat_mu[k, j, i]
-            old_nat_vi_delta[i, k] += -0.5 * (this_addenda - last)
-    return old_nat_vi_delta
-
-
 @njit('float64[:, :](float64[:, :])', parallel=True, cache=True)
 def invert_nat_cat_2D(probs):
+    """Convert from log(probs[i] / probs[-1]) to probabilities"""
     to_return = np.empty((probs.shape[0], probs.shape[1] + 1))
     for i in prange(to_return.shape[0]):
         max_p = np.maximum(np.max(probs[i]), 0)
@@ -207,6 +198,7 @@ def invert_nat_cat_2D(probs):
 @njit('float64[:, :](float64[:, :, :], float64[:, :, :], float64[:, :],'
       'float64[:, :])', parallel=True, cache=True)
 def fast_invert_nat_vi_delta(new_mu, nat_mu, const_part, nat_vi_delta):
+    """Convert natural parameterization of VI delta to standard params"""
     to_invert = np.empty_like(nat_vi_delta)
     for i in prange(to_invert.shape[0]):
         last = const_part[i, -1]
@@ -222,7 +214,8 @@ def fast_invert_nat_vi_delta(new_mu, nat_mu, const_part, nat_vi_delta):
 
 
 @njit('float64[:, :, :, :](float64[:, :, :, :])', parallel=True, cache=True)
-def matrix_invert_4d_numba(matrix):
+def _matrix_invert_4d_numba(matrix):
+    """Matrix inversion For 4D arrays where last 2Ds are 2x2 matrices"""
     if matrix.shape[-1] == 0:
         return np.zeros_like(matrix)
     if matrix.shape[-1] == 1:
@@ -238,40 +231,21 @@ def matrix_invert_4d_numba(matrix):
         to_return[1, 0, :, :] = to_return[0, 1, :, :]
         return np.transpose(to_return, (3, 2, 1, 0))
     else:
-        return np.full_like(matrix, np.nan)
-
-
-@njit('float64[:, :, :](float64[:, :, :])', parallel=True, cache=True)
-def matrix_invert_3d_numba(matrix):
-    if matrix.shape[-1] == 0:
-        return np.zeros_like(matrix)
-    if matrix.shape[-1] == 1:
-        return 1. / matrix
-    if matrix.shape[-1] == 2:
-        matrix = np.transpose(matrix, (2, 1, 0))
-        to_return = np.empty_like(matrix)
-        det = 1. / (matrix[0, 0, :] * matrix[1, 1, :]
-                    - matrix[0, 1, :] * matrix[1, 0, :])
-        to_return[0, 0, :] = matrix[1, 1, :] * det
-        to_return[1, 1, :] = matrix[0, 0, :] * det
-        to_return[0, 1, :] = -matrix[0, 1, :] * det
-        to_return[1, 0, :] = to_return[0, 1, :]
-        return np.transpose(to_return, (2, 1, 0))
-    else:
-        return np.full_like(matrix, np.nan)
+        raise ValueError('_matrix_invert_4d_numba cannot be used '
+                         'on matrices larger than 2x2')
 
 
 def matrix_invert(matrix):
+    """Matrix inversion that is faster for some special cases"""
     if matrix.shape[-1] > 2:
         return np.linalg.inv(matrix)
     if len(matrix.shape) == 4:
-        return matrix_invert_4d_numba(matrix)
-    if len(matrix.shape) == 3:
-        return matrix_invert_3d_numba(matrix)
+        return _matrix_invert_4d_numba(matrix)
     return np.linalg.inv(matrix)
 
 
 def vi_sigma_inv(matrices):
+    """Invert 4D arrays where middle 2 Ds form a matrix"""
     # kpqi->ikpq
     inv = matrix_invert(
         np.transpose(matrices, (3, 0, 1, 2))
@@ -281,7 +255,8 @@ def vi_sigma_inv(matrices):
 
 
 @njit('float64[:, :](float64[:, :, :, :])', parallel=True, cache=True)
-def matrix_log_det_4d_numba(matrix):
+def _matrix_log_det_4d_numba(matrix):
+    """Compute the log determinants of a 4D array of 2x2 matrices"""
     if matrix.shape[-1] == 0:
         return np.zeros((matrix.shape[0], matrix.shape[1]))
     if matrix.shape[-1] == 1:
@@ -292,34 +267,21 @@ def matrix_log_det_4d_numba(matrix):
                - matrix[0, 1, :, :] * matrix[1, 0, :, :])
         return np.log(det)
     else:
-        return np.full((matrix.shape[0], matrix.shape[1]), np.nan)
-
-
-@njit('float64[:](float64[:, :, :])', parallel=True, cache=True)
-def matrix_log_det_3d_numba(matrix):
-    if matrix.shape[-1] == 0:
-        return np.zeros(matrix.shape[0])
-    if matrix.shape[-1] == 1:
-        return np.log(matrix[:, 0, 0])
-    if matrix.shape[-1] == 2:
-        matrix = np.transpose(matrix, (2, 1, 0))
-        det = (matrix[0, 0, :] * matrix[1, 1, :]
-               - matrix[0, 1, :] * matrix[1, 0, :])
-        return np.log(det)
-    else:
-        return np.full(matrix.shape[0], np.nan)
+        raise ValueError('_matrix_log_det_4d_numba cannot be used '
+                         'on matrices larger than 2x2')
 
 
 def matrix_log_det(matrix):
+    """Compute matrix log determinant more quickly in some special cases"""
     if matrix.shape[-1] > 2:
         return np.linalg.slogdet(matrix)[1]
     if len(matrix.shape) == 4:
-        return matrix_log_det_4d_numba(matrix)
-    if len(matrix.shape) == 3:
-        return matrix_log_det_3d_numba(matrix)
+        return _matrix_log_det_4d_numba(matrix)
+    return np.linalg.slogdet(matrix)[1]
 
 
 def vi_sigma_log_det(matrices):
+    """Log determinants for 4D arrays where middle 2 Ds form a matrix"""
     # kpqi->ikpq
     log_det = matrix_log_det(
         np.transpose(matrices, (3, 0, 1, 2))

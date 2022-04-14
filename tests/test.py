@@ -5,6 +5,7 @@ from pytest import raises
 from vilma import matrix_structures as mat_structs
 from vilma import load
 from vilma import make_ld_schema
+from vilma import numerics
 
 
 # everything should be relative to this files directory
@@ -711,3 +712,351 @@ def test_make_ld_schema():
             assert vfh.readline() == '.\t1\t975\t0.0\tT\tC\n'
             assert not vfh.readline()
         assert not fh.readline()
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+# test numerics.py
+
+def test_sum_betas():
+    x = np.random.random((2, 50, 3))
+    y = np.random.random((2, 50, 3))
+    alpha = np.random.random()
+    true = alpha*x + (1-alpha)*y
+    est = numerics.sum_betas(y, x, alpha)
+    assert np.allclose(true, est)
+
+
+def test_fast_divide():
+    x = np.random.random((10, 100))
+    y = np.random.random((10, 100))
+    assert np.allclose(x/y, numerics.fast_divide(x, y))
+
+
+def test_fast_linked_ests():
+    x = np.random.random((100, 10))
+    y = np.random.random((100, 10))
+    w = np.random.random((100, 10))
+    z = np.random.random((100, 10))
+    assert np.allclose(numerics.fast_linked_ests(x, y, w, z),
+                       x/y - z*w)
+
+
+def test_fast_likelihood():
+    mu = np.random.normal(size=(3, 2, 100))
+    var = np.zeros((3, 2, 2, 100))
+    var[:, np.arange(2), np.arange(2), :] = np.random.random(size=(3, 2, 100))
+    std_errs = np.random.random((2, 100))
+    delta = np.random.random((100, 3))
+    delta /= delta.sum(axis=1, keepdims=True)
+    err_scaling = np.random.random(2)
+    ld_ranks = np.array([100., 100.])
+    chi_stat = np.random.normal(size=2)
+
+    adj_marg = np.random.normal(size=(2, 100))
+    ld_diags = np.random.random(size=(2, 100))
+    scaled_ld_diags = ld_diags / std_errs**2
+    ld_mats = [np.diag(ld_diags[0]), np.diag(ld_diags[1])]
+
+    post_means = numerics.fast_posterior_mean(mu, delta)
+    diags = np.einsum('kppi->kpi', var)
+    post_vars = numerics.fast_pmv(post_means, mu, delta, diags)
+    linked_ests = np.empty_like(post_means)
+    scaled_mu = numerics.fast_divide(post_means, std_errs)
+
+    true_like = 0.
+    for p in range(2):
+        linked_ests[p] = ld_mats[p].dot(scaled_mu[p])
+        this_like = -0.5 * (ld_diags[p] * post_vars[p]
+                            * (std_errs[p] ** (-2))).sum()
+        this_like += -0.5 * scaled_mu[p].dot(ld_mats[p].dot(scaled_mu[p]))
+        this_like += post_means[p].dot(adj_marg[p])
+        this_like /= err_scaling[p]
+        this_like += (-0.5 * ld_ranks[p]
+                      * np.log(err_scaling[p]))
+        this_like += (-0.5 * chi_stat[p] / err_scaling[p])
+        true_like += this_like
+    fast_like = numerics.fast_likelihood(post_means,
+                                         post_vars,
+                                         scaled_mu,
+                                         scaled_ld_diags,
+                                         linked_ests,
+                                         adj_marg,
+                                         chi_stat,
+                                         ld_ranks,
+                                         err_scaling)
+    assert np.isclose(true_like, fast_like)
+
+
+def test_fast_posterior_mean():
+    mu = np.random.normal(size=(3, 2, 100))
+    delta = np.random.random((100, 3))
+    delta /= delta.sum(axis=1, keepdims=True)
+    true_mean = np.einsum('kpi,ik->pi',
+                          mu,
+                          delta)
+    assert np.allclose(true_mean,
+                       numerics.fast_posterior_mean(mu,
+                                                    delta))
+
+
+def test_fast_pmv():
+    mu = np.random.normal(size=(3, 2, 100))
+    var = np.zeros((3, 2, 2, 100))
+    var[:, np.arange(2), np.arange(2), :] = np.random.random(size=(3, 2, 100))
+    delta = np.random.random((100, 3))
+    delta /= delta.sum(axis=1, keepdims=True)
+
+    true_mean = np.einsum('kpi,ik->pi',
+                          mu,
+                          delta)
+    mean_sq = true_mean**2
+    diags = np.einsum('kppi->kpi', var)
+    second_moment = np.einsum('kpi,ik->pi',
+                              diags + mu**2,
+                              delta)
+    assert np.allclose(
+        second_moment-mean_sq,
+        numerics.fast_pmv(true_mean, mu, delta, diags)
+    )
+
+
+def test_fast_nat_inner_product_m2():
+    x = np.random.normal(size=(3, 2, 100))
+    v = np.random.random(size=(3, 2, 2, 100))
+    assert np.allclose(
+        -2*np.einsum('sqi,spqi->spi', x, v),
+        numerics.fast_nat_inner_product_m2(x, v)
+    )
+
+
+def test_fast_nat_inner_product():
+    x = np.random.normal(size=(3, 2, 100))
+    v = np.random.random(size=(3, 2, 2, 100))
+    assert np.allclose(
+        np.einsum('sqi,spqi->spi', x, v),
+        numerics.fast_nat_inner_product(x, v)
+    )
+    assert np.allclose(
+        numerics.fast_nat_inner_product_m2(x, v),
+        -2*numerics.fast_nat_inner_product(x, v)
+    )
+
+
+def test_fast_inner_product_comp():
+    x = np.random.normal(size=(3, 2, 100))
+    v = np.random.random(size=(3, 2, 2, 1))
+    d = np.random.random(size=(100, 3))
+    assert np.allclose(
+        0.5 * np.einsum('kpi,kqi,kpqd,ik->',
+                        x, x, v, d),
+        numerics.fast_inner_product_comp(x, v, d)
+    )
+    v = np.random.random(size=(3, 2, 2, 100))
+    with raises(ValueError):
+        numerics.fast_inner_product_comp(x, v, d)
+
+
+def test_sum_annotations():
+    deltas = np.random.random((100, 5))
+    annotations = np.copy(np.array([0]*50 + [1]*50))
+    truth = np.zeros((2, 5))
+    truth[0] = deltas[0:50].sum(axis=0)
+    truth[1] = deltas[50:100].sum(axis=0)
+    assert np.allclose(
+        truth,
+        numerics.sum_annotations(deltas, annotations, 2)
+    )
+
+
+def test_fast_delta_kl():
+    deltas = np.random.random((100, 5))
+    annotations = np.copy(np.array([0]*50 + [1]*50))
+    hyper_delta = np.random.random((2, 5))
+    truth = ((deltas[0:50] * np.log(deltas[0:50]/hyper_delta[0])).sum()
+             + (deltas[50:] * np.log(deltas[50:]/hyper_delta[1])).sum())
+    assert np.isclose(
+        truth, numerics.fast_delta_kl(deltas, hyper_delta, annotations)
+    )
+
+
+def test_fast_beta_kl():
+    x = np.random.random((100, 3))
+    d = np.random.random((100, 3))
+    assert np.isclose(0.5 * (x*d).sum(),
+                      numerics.fast_beta_kl(x, d))
+
+
+def test_fast_vi_delta_grad():
+    annotations = np.copy(np.array([0]*50 + [1]*50))
+    hyper_delta = np.random.random((2, 5))
+    log_det = np.random.normal(size=(5))
+    truth = np.zeros((100, 5))
+    truth = np.log(hyper_delta)[annotations] - 0.5*log_det
+    truth[:, 0:4] -= truth[:, -1:]
+    truth = truth[:, 0:4]
+    assert np.allclose(
+        truth,
+        numerics.fast_vi_delta_grad(hyper_delta, log_det, annotations)
+    )
+
+
+def test_map_to_nat_cat_2D():
+    x = np.random.random((5, 10))
+    x /= x.sum(axis=1, keepdims=True)
+    nat_x = numerics.map_to_nat_cat_2D(x)
+    true_nat = np.log(x[:, :-1]/x[:, -1:])
+    assert np.allclose(nat_x, true_nat)
+
+
+def test_invert_nat_cat_2D():
+    x = np.random.random((5, 10))
+    x /= x.sum(axis=1, keepdims=True)
+    nat_x = numerics.map_to_nat_cat_2D(x)
+    inv_nat_x = numerics.invert_nat_cat_2D(nat_x)
+    assert np.allclose(x, inv_nat_x)
+
+    nat_x = np.random.normal(size=(5, 10))
+    inv_nat_x = numerics.invert_nat_cat_2D(nat_x)
+    nat_x_ext = np.zeros((5, 11))
+    nat_x_ext[:, :-1] = nat_x
+    true = np.exp(nat_x_ext)
+    true /= true.sum(axis=1, keepdims=True)
+    assert np.allclose(inv_nat_x, true)
+
+
+def test_fast_invert_nat_vi_delta():
+    new_mu = np.random.random((3, 2, 100))
+    nat_mu = np.random.random((3, 2, 100))
+    const_part = np.random.random((100, 3))
+    nat_vi_delta = np.random.random((100, 2))
+
+    quad_forms = (new_mu * nat_mu).sum(axis=1)
+    nat_adj = -.5*(quad_forms.T + const_part)
+    nat_adj = nat_adj[:, :-1] - nat_adj[:, -1:]
+    true_vi_delta = numerics.invert_nat_cat_2D(
+        nat_vi_delta - nat_adj
+    )
+
+    fast_vi_delta = numerics.fast_invert_nat_vi_delta(
+        new_mu,
+        nat_mu,
+        const_part,
+        nat_vi_delta
+    )
+
+    assert np.allclose(true_vi_delta, fast_vi_delta)
+
+
+def test_matrix_invert_4d_numba():
+    x = np.random.random((2, 10, 2, 2))
+    x = x + np.transpose(x, [0, 1, 3, 2])
+    x[:, :, np.arange(2), np.arange(2)] += 3
+    assert np.allclose(
+        numerics._matrix_invert_4d_numba(x),
+        np.linalg.inv(x)
+    )
+    x = np.random.random((2, 10, 1, 1))
+    x = x + np.transpose(x, [0, 1, 3, 2])
+    x[:, :, np.arange(1), np.arange(1)] += 3
+    assert np.allclose(
+        numerics._matrix_invert_4d_numba(x),
+        np.linalg.inv(x)
+    )
+
+
+def test_matrix_invert():
+    x = np.random.random((2, 2))
+    x = x + x.T + 3 * np.eye(2)
+    assert np.allclose(
+        np.linalg.inv(x),
+        numerics.matrix_invert(x)
+    )
+    x = np.random.random((10, 2, 2))
+    x = x + np.transpose(x, [0, 2, 1])
+    x[:, np.arange(2), np.arange(2)] += 3
+    assert np.allclose(
+        numerics.matrix_invert(x),
+        np.linalg.inv(x)
+    )
+    x = np.random.random((2, 10, 2, 2))
+    x = x + np.transpose(x, [0, 1, 3, 2])
+    x[:, :, np.arange(2), np.arange(2)] += 3
+    assert np.allclose(
+        numerics.matrix_invert(x),
+        np.linalg.inv(x)
+    )
+    x = np.random.random((2, 2, 10, 2, 2))
+    x = x + np.transpose(x, [0, 1, 2, 4, 3])
+    x[:, :, :, np.arange(2), np.arange(2)] += 3
+    assert np.allclose(
+        numerics.matrix_invert(x),
+        np.linalg.inv(x)
+    )
+
+
+def test_vi_sigma_inv():
+    x = np.random.random((3, 2, 2, 100))
+    x = x + np.transpose(x, [0, 2, 1, 3])
+    x[:, np.arange(2), np.arange(2), :] += 3
+    true = np.array(
+        [np.linalg.inv(m.T).T for m in x]
+    )
+    assert np.allclose(
+        numerics.vi_sigma_inv(x),
+        true
+    )
+
+
+def test_matrix_log_det_4d_numba():
+    x = np.random.random((3, 100, 2, 2))
+    x = x + np.transpose(x, [0, 1, 3, 2])
+    x[:, :, np.arange(2), np.arange(2)] += 3
+    assert np.allclose(
+        numerics._matrix_log_det_4d_numba(x),
+        np.linalg.slogdet(x)[1]
+    )
+    x = np.random.random((3, 100, 1, 1))
+    assert np.allclose(
+        numerics._matrix_log_det_4d_numba(x),
+        np.linalg.slogdet(x)[1]
+    )
+
+
+def test_matrix_log_det():
+    x = np.random.random((3, 100, 2, 2))
+    x = x + np.transpose(x, [0, 1, 3, 2])
+    x[:, :, np.arange(2), np.arange(2)] += 3
+    assert np.allclose(
+        numerics.matrix_log_det(x),
+        np.linalg.slogdet(x)[1]
+    )
+    x = np.random.random((3, 100, 4, 4))
+    x = x + np.transpose(x, [0, 1, 3, 2])
+    x[:, :, np.arange(4), np.arange(4)] += 3
+    assert np.allclose(
+        numerics.matrix_log_det(x),
+        np.linalg.slogdet(x)[1]
+    )
+    x = np.random.random((4, 4))
+    x = x + np.transpose(x, [1, 0])
+    x[np.arange(4), np.arange(4)] += 3
+    assert np.allclose(
+        numerics.matrix_log_det(x),
+        np.linalg.slogdet(x)[1]
+    )
+
+
+def test_vi_sigma_log_det():
+    x = np.random.random((3, 2, 2, 100))
+    x = x + np.transpose(x, [0, 2, 1, 3])
+    x[:, np.arange(2), np.arange(2), :] += 3
+
+    true = np.array(
+        [np.linalg.slogdet(m.T)[1].T for m in x]
+    )
+    assert np.allclose(
+        numerics.vi_sigma_log_det(x),
+        true
+    )
