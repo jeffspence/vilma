@@ -12,6 +12,7 @@ Classes:
 import logging
 import numpy as np
 from vilma import numerics
+from vilma.matrix_structure import BlockDiagonalMatrix
 
 
 L_MAX = 1e12        # sets minimum natural gradient stepsize is 1/L_MAX
@@ -171,7 +172,6 @@ class VIScheme():
                              'GWAS standard errors')
 
         self.scaled = scaled    # whether to do Z-scores or not
-
         self.scale_se = scale_se    # whether to learn an SE scaling
         self.error_scaling = np.ones(marginal_effects.shape[0])
 
@@ -180,31 +180,32 @@ class VIScheme():
 
         self.num_pops = marginal_effects.shape[0]
         self.num_loci = marginal_effects.shape[1]
-        assert marginal_effects.shape == (self.num_pops, self.num_loci)
-        assert len(ld_mats) == self.num_pops
-        try:
-            self.ld_diags = np.concatenate(
-                [ld.diag().reshape((1, -1)) for ld in ld_mats],
-                axis=0
-            )
-        except AttributeError:
-            diags = []
-            for ld in ld_mats:
-                idxr = np.arange(len(ld))
-                diags.append(ld[idxr, idxr].reshape((1, -1)))
-            self.ld_diags = np.concatenate(diags, axis=0)
+        if len(ld_mats) != self.num_pops:
+            raise ValueError('Fewer LD matrices than populations.')
+        for ld in ld_mats:
+            if not isinstance(ld, BlockDiagonalMatrix):
+                raise ValueError('LD Matrices must be '
+                                 'of type BlockDiagonalMatrix.')
+        self.ld_diags = np.concatenate(
+            [ld.diag().reshape((1, -1)) for ld in ld_mats],
+            axis=0
+        )
         for p, ldm in enumerate(ld_mats):
-            assert ldm.shape == (self.num_loci, self.num_loci)
-        assert np.allclose(annotations.sum(axis=1), 1)
+            if ldm.shape != (self.num_loci, self.num_loci):
+                raise ValueError('LD matrix shape does not match '
+                                 'GWAS marginal effect size shape.')
+        if not np.allclose(annotations.sum(axis=1), 1):
+            raise ValueError('Some SNPs are either missing annotations '
+                             'or have more than one annotation.')
         self.num_annotations = annotations.shape[1]
-        assert annotations.shape[0] == self.num_loci
+        if annotations.shape[0] != self.num_loci:
+            raise ValueError('annotations dimension does not match GWAS '
+                             'marginal effect size shape.')
 
-        # Store things
         self.marginal_effects = np.copy(marginal_effects)
         if self.scaled:
             self.marginal_effects = self.marginal_effects / (std_errs +
                                                              numerics.EPSILON)
-        # self.marginal_effects.flags.writeable = False
         if self.scaled:
             self.std_errs = np.ones_like(std_errs)
             self.scalings = (std_errs + numerics.EPSILON)
@@ -212,13 +213,9 @@ class VIScheme():
             self.std_errs = np.copy(std_errs)
             self.scalings = np.ones_like(std_errs)
         self.scaled_ld_diags = self.std_errs**-2 * self.ld_diags
-        # self.std_errs.flags.writeable = False
         self.ld_mats = ld_mats
-        # self.ld_diags.flags.writeable = False
         self.annotations = np.copy(np.where(annotations)[1])
-        # self.annotations.flags.writeable = False
         self.annotation_counts = annotations.sum(axis=0)
-        # self.annotation_counts.flags.writeable = False
         self.checkpoint_freq = checkpoint_freq
         self.checkpoint_path = checkpoint_path
         self.init_hg = init_hg
@@ -234,70 +231,31 @@ class VIScheme():
         self.ld_ranks = np.zeros(self.num_pops)
         self._einsum_paths = {}
 
-        # Compute MLE of betas
         self.inverse_betas = np.zeros_like(self.marginal_effects)
         for p in range(self.num_pops):
-            try:
-                # this is basically an approximation to
-                # LDpred-inf with a relatively arbitrarily
-                # chosen regularization penalty.
-                # inv_z_scores = ld_mats[p].ridge_inverse_dot(
-                #     self.marginal_effects[p] / self.std_errs[p],
-                #     self.marginal_effects.shape[1] * 10 / gwas_N[p]
-                # )
-                # self.inverse_betas[p, :] = inv_z_scores * self.std_errs[p]
-                z_scores = self.marginal_effects[p] / self.std_errs[p]
-                mle[p] = ld_mats[p].inverse.dot(z_scores)
-                self.chi_stat[p] = z_scores.dot(mle[p])
-                this_adj_marg = np.copy(mle[p])
-                this_adj_marg = ld_mats[p].dot(this_adj_marg)
-                this_adj_marg = this_adj_marg / self.std_errs[p]
-                self.adj_marginal_effects[p, :] = this_adj_marg
-                self.ld_ranks[p] = ld_mats[p].get_rank()
+            z_scores = self.marginal_effects[p] / self.std_errs[p]
+            mle[p] = ld_mats[p].inverse.dot(z_scores)
+            self.chi_stat[p] = z_scores.dot(mle[p])
+            this_adj_marg = np.copy(mle[p])
+            this_adj_marg = ld_mats[p].dot(this_adj_marg)
+            this_adj_marg = this_adj_marg / self.std_errs[p]
+            self.adj_marginal_effects[p, :] = this_adj_marg
+            self.ld_ranks[p] = ld_mats[p].get_rank()
 
-                # this is the LDpred model
-                # inv_z_scores = ld_mats[p].ridge_inverse_dot(
-                #     this_adj_marg * self.std_errs[p],
-                #     self.marginal_effects.shape[1] / gwas_N[p] / init_hg[p]
-                # )
-                # self.inverse_betas[p, :] = inv_z_scores * self.std_errs[p]
+            prior = (2 * gwas_N[p] * init_hg[p]
+                     / (self.std_errs[p, :]**-2).sum())
+            inv_z_scores = ld_mats[p].ridge_inverse_dot(
+                this_adj_marg * self.std_errs[p],
+                self.std_errs[p, :]**2 / prior
+            )
+            self.inverse_betas[p, :] = inv_z_scores * self.std_errs[p]
 
-                # this is the effect size is ind. of freq model
-                prior = (2 * gwas_N[p] * init_hg[p]
-                         / (self.std_errs[p, :]**-2).sum())
-                inv_z_scores = ld_mats[p].ridge_inverse_dot(
-                    this_adj_marg * self.std_errs[p],
-                    self.std_errs[p, :]**2 / prior
-                )
-                self.inverse_betas[p, :] = inv_z_scores * self.std_errs[p]
-
-            except AttributeError:
-                logging.warning('Computing inverse of LD matrix via direct '
-                                'methods because the LD matrix for population '
-                                '%d does not have a .inverse attribute...'
-                                'Could be very slow.', p)
-                scale = self.marginal_effects.shape[1] * 10 / 100000.
-                inv_z_scores = np.linalg.solve(
-                    ld_mats[p] + np.eye(ld_mats[p].shape[0]) * scale,
-                    self.marginal_effects[p] / self.std_errs[p]
-                )
-                self.inverse_betas[p, :] = inv_z_scores * self.std_errs[p]
-                self.adj_marginal_effects[p, :] = (
-                    self.marginal_effects[p, :] / (self.std_errs[p, :] ** 2)
-                )
-                self.ld_ranks[p] = ld_mats[p].shape[0]
-                z_scores = self.marginal_effects[p, :] / self.std_errs[p, :]
-                self.chi_stat[p] = z_scores.dot(np.lianlg.solve(
-                    ld_mats[p], z_scores
-                ))
-        assert np.allclose(
+        if not np.allclose(
             self.adj_marginal_effects[np.isclose(self.ld_diags, 0)],
             0
-        )
-        # self.inverse_betas.flags.writeable = False
-        # self.adj_marginal_effects.flags.writeable = False
-        # self.chi_stat.flags.writeable = False
-        # self.ld_ranks.flags.writeable = False
+        ):
+            raise ValueError('Some SNPs that are missing in the LD matrix '
+                             'are not being treated as missing.')
 
     def _fast_einsum(self, *args, key=None):
         """
@@ -329,6 +287,46 @@ class VIScheme():
                          key, e_path[1])
             self._einsum_paths[key] = e_path[0]
         return np.einsum(*args, optimize=self._einsum_paths[key])
+
+    def _dump_info(self, num_its, new_post_mean, post_mean, ckp_post_mean):
+        """Log information about convergence"""
+        logging.info('Completed iteration %d', num_its + 1)
+        logging.info('Maximum posterior mean beta: %e',
+                     np.max(np.abs(new_post_mean)))
+        logging.info('SE scaling is: %r', self.error_scaling)
+        logging.info(
+            'Max relative difference is: %e',
+            np.max(np.abs((new_post_mean - post_mean) / post_mean))
+        )
+        logging.info(
+            'Max absolute difference is: %e',
+            np.max(np.abs(new_post_mean - post_mean))
+        )
+        logging.info(
+            'Mean absolute difference is: %e',
+            np.mean(np.abs(new_post_mean - post_mean))
+        )
+        logging.info(
+            'RMSE difference is: %e',
+            np.sqrt(np.mean((new_post_mean - post_mean)**2))
+        )
+        logging.info(
+            'Max relative difference (checkpoint iterations) is: %e',
+            np.max(np.abs((new_post_mean - ckp_post_mean)
+                          / ckp_post_mean))
+        )
+        logging.info(
+            'Max absolute difference (checkpoint iterations) is: %e',
+            np.max(np.abs(new_post_mean - ckp_post_mean))
+        )
+        logging.info(
+            'Mean absolute difference (checkpoint iterations) is: %e',
+            np.mean(np.abs(new_post_mean - ckp_post_mean))
+        )
+        logging.info(
+            'RMSE difference (checkpoint iterations) is: %e',
+            np.sqrt(np.mean((new_post_mean - ckp_post_mean)**2))
+        )
 
     def optimize(self):
         """Initialize params and optimize objective function"""
@@ -367,43 +365,7 @@ class VIScheme():
             if num_its < 10:
                 converged = False
 
-            logging.info('Completed iteration %d', num_its + 1)
-            logging.info('Maximum posterior mean beta: %e',
-                         np.max(np.abs(new_post_mean)))
-            logging.info('SE scaling is: %r', self.error_scaling)
-            logging.info(
-                'Max relative difference is: %e',
-                np.max(np.abs((new_post_mean - post_mean) / post_mean))
-            )
-            logging.info(
-                'Max absolute difference is: %e',
-                np.max(np.abs(new_post_mean - post_mean))
-            )
-            logging.info(
-                'Mean absolute difference is: %e',
-                np.mean(np.abs(new_post_mean - post_mean))
-            )
-            logging.info(
-                'RMSE difference is: %e',
-                np.sqrt(np.mean((new_post_mean - post_mean)**2))
-            )
-            logging.info(
-                'Max relative difference (checkpoint iterations) is: %e',
-                np.max(np.abs((new_post_mean - ckp_post_mean)
-                              / ckp_post_mean))
-            )
-            logging.info(
-                'Max absolute difference (checkpoint iterations) is: %e',
-                np.max(np.abs(new_post_mean - ckp_post_mean))
-            )
-            logging.info(
-                'Mean absolute difference (checkpoint iterations) is: %e',
-                np.mean(np.abs(new_post_mean - ckp_post_mean))
-            )
-            logging.info(
-                'RMSE difference (checkpoint iterations) is: %e',
-                np.sqrt(np.mean((new_post_mean - ckp_post_mean)**2))
-            )
+            self._dump_info(num_its, new_post_mean, post_mean, ckp_post_mean)
 
             post_mean = new_post_mean
             num_its += 1
@@ -425,7 +387,6 @@ class VIScheme():
          elbo_change) = self._nat_grad_step(params, L, line_search_rate,
                                             running_elbo_delta)
         elbo = curr_elbo + elbo_change
-        # assert elbo_change > -1e-5
         if running_elbo_delta is None:
             running_elbo_delta = elbo_change
         running_elbo_delta *= ELBO_MOMENTUM
@@ -467,8 +428,6 @@ class VIScheme():
             params = self._nat_to_not_vi_delta(params)
             new_obj = self.elbo(params)
             new_elbo_delta += new_obj - orig_obj
-            # assert new_obj - orig_obj >= np.min(
-            #     [orig_obj-np.abs(1e-5*orig_obj), -1e-5]), (new_obj, orig_obj)
             logging.info('...Updating error_scaling, old ELBo=%f, '
                          'new ELBo=%f', orig_obj, new_obj)
 
@@ -482,16 +441,7 @@ class VIScheme():
         scaled_mu = numerics.fast_divide(post_means, self.std_errs)
         for p in range(self.num_pops):
             linked_ests[p] = self.ld_mats[p].dot(scaled_mu[p])
-            # this_like = -0.5 * (self.ld_diags[p] * post_vars[p]
-            #                     * (self.std_errs[p] ** (-2))).sum()
-            # scaled_mu = post_means[p] / self.std_errs[p]
-            # this_like += -0.5 * scaled_mu.dot(self.ld_mats[p].dot(scaled_mu))
-            # this_like += post_means[p].dot(self.adj_marginal_effects[p])
-            # this_like /= self.error_scaling[p]
-            # this_like += (-0.5 * self.ld_ranks[p]
-            #               * np.log(self.error_scaling[p]))
-            # this_like += (-0.5 * self.chi_stat[p] / self.error_scaling[p])
-            # to_return += this_like
+
         to_return = numerics.fast_likelihood(post_means,
                                              post_vars,
                                              scaled_mu,
@@ -623,9 +573,13 @@ class MultiPopVI(VIScheme):
         """
         num_pops = kwargs['marginal_effects'].shape[0]
         for mc in mixture_covs:
-            assert mc.shape == (num_pops, num_pops)
+            if mc.shape != (num_pops, num_pops):
+                raise ValueError('Mixture component has a '
+                                 'covariance matrix of the wrong shape.')
         signs, _ = np.linalg.slogdet(mixture_covs)
-        assert np.all(signs == 1)
+        if not np.all(signs == 1):
+            raise ValueError('Mixture component has a non-positive definite '
+                             'covariance matrix.')
 
         self.num_mix = len(mixture_covs)
         VIScheme.__init__(self,
@@ -759,19 +713,10 @@ class MultiPopVI(VIScheme):
     def _posterior_mean(self, vi_mu, vi_delta, hyper_delta):
         """Compute the posterior mean"""
         return numerics.fast_posterior_mean(vi_mu, vi_delta)
-        # return self._fast_einsum('kpi,ik->pi',
-        #                          vi_mu,
-        #                          vi_delta,
-        #                          key='_posterior_mean1')
 
     def _posterior_marginal_variance(self, mean, vi_mu, vi_delta, hyper_delta):
         """Compute the posterior variance at in each population at each SNP"""
-        # mean_sq = self._posterior_mean(vi_mu, vi_delta, hyper_delta)**2
         temp = self._fast_einsum('kppi->kpi', self.vi_sigma, key='pmv1')
-        # second_moment = self._fast_einsum('kpi,ik->pi',
-        #                                   temp + vi_mu**2,
-        #                                   vi_delta,
-        #                                   key='pmv2')
         return numerics.fast_pmv(mean, vi_mu, vi_delta, temp)
 
     def _update_beta(self, vi_mu, vi_delta, hyper_delta, orig_obj, L,
@@ -779,37 +724,20 @@ class MultiPopVI(VIScheme):
         """Take a natural gradient step for the variational family for beta"""
         if orig_obj is None:
             orig_obj = self._beta_objective((vi_mu, vi_delta, hyper_delta))
-        # old_nat_mu = -2 * self._fast_einsum('spqi,sqi->spi',
-        #                                     self.nat_sigma,
-        #                                     vi_mu,
-        #                                     key='_update_beta1')
         old_nat_mu = numerics.fast_nat_inner_product_m2(vi_mu, self.nat_sigma)
         const_part = np.copy(self.vi_sigma_log_det.T)
 
-        assert self.nat_grad_vi_delta is not None
+        if self.nat_grad_vi_delta is None:
+            raise RuntimeError('nat_grad_vi_delta must always be set '
+                               'prior to running _update_beta')
 
         nat_grad_mu = self._nat_grad_beta(vi_mu,
                                           vi_delta,
                                           hyper_delta)
         while True:
             step_size = 1. / L[idx]
-            # nat_mu = step_size * nat_grad_mu + (1. - step_size) * old_nat_mu
             nat_mu = numerics.sum_betas(old_nat_mu, nat_grad_mu, step_size)
-            # nat_vi_delta = (step_size * nat_grad_vi_delta
-            #                 + (1. - step_size) * old_nat_vi_delta)
-            # nat_vi_delta = _sum_deltas(old_nat_vi_delta,
-            #                            self.nat_grad_vi_delta,
-            #                            step_size)
-            # new_mu = self._fast_einsum('spqi,sqi->spi',
-            #                            self.vi_sigma,
-            #                            nat_mu,
-            #                            key='_update_beta1')
             new_mu = numerics.fast_nat_inner_product(nat_mu, self.vi_sigma)
-            # quad_forms = (new_mu * nat_mu).sum(axis=1)
-            # nat_adj = -.5*(quad_forms.T + const_part)
-            # nat_adj = nat_adj[:, :-1] - nat_adj[:, -1:]
-            # new_vi_delta = _invert_nat_cat_2D(nat_vi_delta - nat_adj)
-            # new_vi_delta = np.maximum(new_vi_delta, EPSILON)
             new_vi_delta = numerics.fast_invert_nat_vi_delta(
                 new_mu,
                 nat_mu,
@@ -821,10 +749,12 @@ class MultiPopVI(VIScheme):
                          orig_obj, new_obj)
             if new_obj >= orig_obj:
                 if L[idx] > L_MAX:
-                    assert np.isclose(orig_obj, new_obj)
+                    if not np.isclose(orig_obj, new_obj):
+                        raise RuntimeError('Encountered a numerical error.')
                 break
             if L[idx] > L_MAX:
-                assert np.isclose(orig_obj, new_obj), np.max(vi_delta)
+                if not np.isclose(orig_obj, new_obj):
+                    raise RuntimeError('Encountered a numerical error.')
                 return (vi_mu, vi_delta,
                         hyper_delta), L, orig_obj, orig_obj
             L[idx] *= lsr
@@ -856,9 +786,6 @@ class MultiPopVI(VIScheme):
                             orig_obj, L, idx, lsr):
         """Update the mixture weights hyperparameter"""
         if orig_obj is None:
-            # orig_obj = self._hyper_delta_objective(
-            #     (vi_mu, vi_delta, hyper_delta)
-            # )
             orig_obj = self.elbo(
                 (vi_mu, vi_delta, hyper_delta)
             )
@@ -873,9 +800,6 @@ class MultiPopVI(VIScheme):
             numerics.EPSILON
         )
         new_hyper_delta /= new_hyper_delta.sum(axis=1, keepdims=True)
-        # new_obj = self._hyper_delta_objective(
-        #     (vi_mu, vi_delta, new_hyper_delta)
-        # )
 
         self.nat_grad_vi_delta = numerics.fast_vi_delta_grad(
             new_hyper_delta,
@@ -888,8 +812,6 @@ class MultiPopVI(VIScheme):
         new_obj = self.elbo(
             (vi_mu, new_vi_delta, new_hyper_delta)
         )
-
-        # assert new_obj > orig_obj - 1e-5
 
         logging.info('...Old objective = %f, new objective = %f',
                      orig_obj, new_obj)
@@ -919,8 +841,6 @@ class MultiPopVI(VIScheme):
         )
         fast_comp = numerics.fast_beta_kl(self.sigma_summary, vi_delta)
 
-        # beta_kl = (delta_comp + log_det_comp + dim_comp
-        #            + inner_product_comp + var_comp)
         beta_kl = delta_comp + inner_product_comp + fast_comp
         return beta_kl
 
