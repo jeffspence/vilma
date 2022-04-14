@@ -24,7 +24,73 @@ ELBO_MOMENTUM = 0.5     # Smoothing parameter for assessing ELBo changes
 
 
 class VIScheme():
+    """
+    Parent class for VI models of GWAS summary statistics
 
+    This class contains machinery to optimize the ELBo to fit variational
+    families to the RSS likelihood model of GWAS data. The details of the VI
+    family must be specified in subclasses, but the abstract machinery of
+    computing likelihoods and performing coordinate ascent on the ELBo is
+    implemented here.
+
+    Fields:
+        param_names: A list of strings containing the names of all of the VI
+            parameters and hyperparameters.
+        scaled: True if the prior is on frequency-scaled effect sizes. False if
+            on unscaled-effect sizes.
+        error_scaling: Numbers to scale the standard errors of each GWAS by.
+        checkpoint: True if model parameters should be stored periodically.
+        num_pops: Number of populations (or traits).
+        num_loci: Number of SNPs.
+        ld_diags: [num_pops][num_loci] numpy array containing the diagonal
+            values of the LD matrices in each population.
+        num_annotations: Total number of distinct annotations
+        marginal_effects: [num_pops][num_loci] numpy array containing the
+            marginal effect sizes estimated by GWAS
+        std_errs: [num_pops][num_loci] numpy array containing the standard
+            errors of the GWAS marginal effect sizes
+        scalings: If prior is on scaled effect sizes, then `scalings` contains
+            the values needed to multiply by to obtain the unscaled effect
+            sizes.
+        scaled_ld_diags: ld_diags * (std_errs**-2) -- useful for some repeated
+            computations
+        ld_mats: [num_pops] length list of BlockDiagonalMatrix objects that
+            represent the LD matrix in each populations
+        annotations: a [num_loci][num_annotations] numpy array one-hot encoded
+            representation of which annotation each SNP belongs to.
+        annotation_counts: Total number of SNPs belonging to each annotation
+        checkpoint_freq: Number of iterations between saving all VI and model
+            parameters
+        checkpoint_path: Destination for saving model checkpoints
+        init_hg: Estimate of the heritability of the trait in each population.
+            Only used in initializing the VI parameters
+        gwas_N:  (Effective) GWAS sample size in each population.  Only used in
+            initializing the VI parameters.
+        num_its: Maximum number of iterations of coordinate ascent to perform
+            before terminating.
+        adj_marginal_effects: S^{-1}XX^{-1}S^{-1}hat{beta} -- that is the
+            GWAS marginal effect sizes, scaled by the standard errors,
+            projected onto the space spanned by the LD Matrix and then scaled
+            by the standard errors again. Stored for use in repeated
+            computations. This is for each population, so it is a numpy array
+            of shape [num_pops][num_loci]
+        chi_stat: hat{beta}^T (SXS)^{-1} hat{beta} -- that is, the Mahalonobis
+            distance of the marginal effect size estimates from the origin,
+            with respect to the covariance matrix SXS, which is the LD matrix
+            scaled on each side by the standard errors. This is a numpy array
+            of shape [num_pops].
+        ld_ranks: The rank of the LD matrix in each population.  A numpy array
+            of shape [num_pops].
+        inverse_betas: LDpred-inf style estimate of the true effect sizes. Only
+            used for initialization of VI parameters.
+    Methods:
+        optimize: Initializes VI family and then performs coordinate ascent
+            until convergence, returning optimal VI parameters.
+        elbo: Compute the evidence lower bound of the VI distribution and model
+            defined by the (hyper)parameters.
+        real_posterior_mean: Compute the posterior mean (in the non-frequency
+            scaled space) of the effect sizes at each SNP in each population.
+    """
     def __init__(self,
                  marginal_effects=None,
                  std_errs=None,
@@ -39,17 +105,70 @@ class VIScheme():
                  gwas_N=None,
                  init_hg=None,
                  num_its=None):
+        """
+        Initialize a VIScheme
 
-        assert init_hg is not None
-        assert gwas_N is not None
-        assert marginal_effects is not None
-        assert std_errs is not None
-        assert ld_mats is not None
-        assert annotations is not None
-        assert mixture_covs is not None
-        assert num_its is not None
-        assert np.all(np.isfinite(marginal_effects))
-        assert np.all(np.isfinite(std_errs))
+        Args:
+            marginal_effects: A [num_populations][num_SNPs] numpy array
+                containing the marginal effect size estimates from a GWAS
+            std_errs: A [num_populations][num_SNPs] numpy array containing the
+                standard errors of the marginal effect size estimates from a
+                GWAS
+            ld_mats: A [num_populations] long list containing
+                BlockDiagonalMatrix objects that represent the LD matrix within
+                each population
+            annotations: A [num_SNPs] integer numpy array containing the label
+                of which annotation each SNP belongs to. For example, if
+                annotations[i] is 0 then SNP i is in the zero'th annotation.
+            mixture_covs: A [num_mixture_components][num_pops][num_pops] numpy
+                array, where mixture_covs[k] represents the k'th covariance
+                matrix in the prior.
+            checkpoint: Whether to periodically store the (hyper)parameters of
+                the model.
+            checkpoint_freq: How many iterations between checkpointing the
+                model.
+            scaled: If true, the prior is on the frequency-scaled effect sizes.
+                If false, the prior in on the natural-scale effect sizes.
+            scale_se: If true, treat the scaling of the standard errors in each
+                GWAS as a hyperparameter and optimize over them.
+            output: Basename for saving files for checkpointing.
+            gwas_N: Estimate of the (effective) GWAS sample size in each
+                population. Only used in initializing the VI parameters.
+            init_hg: Estimate of the heritability of the trait in each
+                population. Only used in initializing the VI parameters.
+            num_its: Maximum number of iterations of coordinate ascent to
+                perform before terminating.
+        """
+        if init_hg is None:
+            raise ValueError('init_hg must be specified when calling '
+                             'VIScheme()')
+        if gwas_N is None:
+            raise ValueError('gwas_N must be specified when calling '
+                             'VIScheme()')
+        if marginal_effects is None:
+            raise ValueError('marginal_effects must be specified when '
+                             'calling VIScheme()')
+        if std_errs is None:
+            raise ValueError('std_errs must be specified when calling '
+                             'VIScheme()')
+        if ld_mats is None:
+            raise ValueError('ld_mats must be specified when calling '
+                             'VIScheme()')
+        if annotations is None:
+            raise ValueError('annotations must be specified when calling '
+                             'VIScheme()')
+        if mixture_covs is None:
+            raise ValueError('mixture_covs must be specififed when calling '
+                             'VIScheme()')
+        if num_its is None:
+            raise ValueError('num_its must be specified when calling '
+                             'VIScheme()')
+        if not np.all(np.isfinite(marginal_effects)):
+            raise ValueError('Encountered an infinite or NaN value in the '
+                             'GWAS effect size estimates')
+        if not np.all(np.isfinite(std_errs)):
+            raise ValueError('Encountered an infinity or NaN value in the '
+                             'GWAS standard errors')
 
         self.scaled = scaled    # whether to do Z-scores or not
 
@@ -111,9 +230,9 @@ class VIScheme():
         # S^{-2} \hat{beta}
         self.adj_marginal_effects = np.zeros_like(self.marginal_effects)
         self.chi_stat = np.zeros(self.num_pops)
-        self.mle = np.zeros((self.num_pops, self.num_loci))
+        mle = np.zeros((self.num_pops, self.num_loci))
         self.ld_ranks = np.zeros(self.num_pops)
-        self.einsum_paths = {}
+        self._einsum_paths = {}
 
         # Compute MLE of betas
         self.inverse_betas = np.zeros_like(self.marginal_effects)
@@ -128,9 +247,9 @@ class VIScheme():
                 # )
                 # self.inverse_betas[p, :] = inv_z_scores * self.std_errs[p]
                 z_scores = self.marginal_effects[p] / self.std_errs[p]
-                self.mle[p] = ld_mats[p].inverse.dot(z_scores)
-                self.chi_stat[p] = z_scores.dot(self.mle[p])
-                this_adj_marg = np.copy(self.mle[p])
+                mle[p] = ld_mats[p].inverse.dot(z_scores)
+                self.chi_stat[p] = z_scores.dot(mle[p])
+                this_adj_marg = np.copy(mle[p])
                 this_adj_marg = ld_mats[p].dot(this_adj_marg)
                 this_adj_marg = this_adj_marg / self.std_errs[p]
                 self.adj_marginal_effects[p, :] = this_adj_marg
@@ -181,17 +300,38 @@ class VIScheme():
         # self.ld_ranks.flags.writeable = False
 
     def _fast_einsum(self, *args, key=None):
+        """
+        Wrapper for np.einsum to enable caching
+
+        Repeatedly computing optimal Einsum contraction paths for optimized
+        np.einsum calls can be costly. These paths will remain the same
+        throughout the lifetime of a VIScheme object, and hence we can cache
+        them. Caching is done by calling with `key` and any time _fast_einsum
+        is called with the same `key` the same Einsum contraction path will be
+        used.
+
+        Args:
+            key: a hashable object that acts as a unique identifier for this
+                einsum path. In general the same key should be used for any
+                _fast_einsum call that will use the same contractions on
+                arguments of the same shape.
+
+        Returns:
+            The results of running np.einsum on *args while using the optimal
+            contraction path.
+        """
         if key is None:
             return np.einsum(*args)
-        if key not in self.einsum_paths:
+        if key not in self._einsum_paths:
             e_path = np.einsum_path(*args, optimize='optimal')
             logging.info('Einsum contraction path optimization results for '
                          '%s :\n %s',
                          key, e_path[1])
-            self.einsum_paths[key] = e_path[0]
-        return np.einsum(*args, optimize=self.einsum_paths[key])
+            self._einsum_paths[key] = e_path[0]
+        return np.einsum(*args, optimize=self._einsum_paths[key])
 
     def optimize(self):
+        """Initialize params and optimize objective function"""
         params = self._initialize()
         converged = False
         elbo = self.elbo(params)
@@ -277,6 +417,7 @@ class VIScheme():
 
     def _optimize_step(self, params, L, curr_elbo,
                        line_search_rate=1.25, running_elbo_delta=None):
+        """Update each set of params and tally up improvement in ELBo"""
         logging.info('Current ELBO = %f and L = %f,%f,%f,%f,%f',
                      curr_elbo, L[0], L[1], L[2], L[3], L[4])
         (new_params,
@@ -292,6 +433,7 @@ class VIScheme():
         return new_params, L_new, elbo, running_elbo_delta
 
     def elbo(self, params):
+        """Compute the ELBo for VI and model specified by `params`"""
         elbo = self._log_likelihood(params)
         elbo -= self._beta_KL(*params)
         elbo -= self._annotation_KL(*params)
@@ -299,6 +441,7 @@ class VIScheme():
 
     def _nat_grad_step(self, params, L, line_search_rate,
                        running_elbo_delta=None):
+        """Perform one iteration of updating each set of (hyper)parameters"""
         updates = [self._update_beta, self._update_hyper_delta,
                    self._update_annotation]
         conv_tol = (float('inf') if running_elbo_delta is None
@@ -361,6 +504,7 @@ class VIScheme():
         return to_return
 
     def _update_error_scaling(self, params):
+        """Update error scaling hyperparameters given VI distribution"""
         to_return = np.zeros_like(self.error_scaling)
         post_means = self._posterior_mean(*params)
         post_vars = self._posterior_marginal_variance(post_means, *params)
@@ -376,18 +520,107 @@ class VIScheme():
         self.error_scaling = to_return
 
     def _beta_objective(self, params):
+        """ELBo terms containing VI distribution on betas"""
         return self._log_likelihood(params) - self._beta_KL(*params)
 
     def _hyper_delta_objective(self, params):
+        """ELBo terms containing per-annotation mixture weights"""
         return -self._delta_KL(*params) - self._annotation_KL(*params)
 
     def _annotation_objective(self, params):
+        """ELBo terms containing prior on per-annotation mixture weights"""
         return -self._annotation_KL(*params)
+
+    # the following methods must be implemented by any subclass
+    def _annotation_KL(self, *params):
+        """Compute KL divergence between VI and prior for annotations"""
+        raise NotImplementedError('_annotation_KL must be implemented by '
+                                  'any VIScheme subclass')
+
+    def _beta_KL(self, *params):
+        """Compute KL divergence between VI and prior for betas"""
+        raise NotImplementedError('_beta_KL must be implemented by '
+                                  'any VIScheme subclass')
+
+    def _delta_KL(self, *params):
+        """Compute KL divergence between VI and prior for mixture weights"""
+        raise NotImplementedError('_delta_KL must be implemented by '
+                                  'any VIScheme subclass')
+
+    def _update_annotation(self, *params, orig_obj, L, idx, lsr):
+        """Update VI distribution for annotations"""
+        raise NotImplementedError('_update_annotation must be implemented by '
+                                  'any VIScheme subclass')
+
+    def _update_hyper_delta(self, *params, orig_obj, L, idx, lsr):
+        """Update VI distribution for mixture weights"""
+        raise NotImplementedError('_update_hyper_delta must be implemented by '
+                                  'any VIScheme subclass')
+
+    def _update_beta(self, *params, orig_obj, L, idx, lsr):
+        """Update VI distribution for effect sizes"""
+        raise NotImplementedError('_update_beta must be implemented by any '
+                                  'VIScheme subclass')
+
+    def _posterior_marginal_variance(self, mean, *params):
+        """Compute the posterior variance of each beta"""
+        raise NotImplementedError('_posterior_marginal_variance must be '
+                                  'implemented by any VIScheme subclass')
+
+    def _posterior_mean(self, *params):
+        """Compute the posterior mean of each beta"""
+        raise NotImplementedError('_posterior_mean must be implemented '
+                                  'by any VIScheme subclass')
+
+    def real_posterior_mean(self, *params):
+        """Compute the posterior mean of each beta in unscaled space"""
+        raise NotImplementedError('real_posterior_mean must be implemented '
+                                  'by any VIScheme subclass')
+
+    def _initialize(self):
+        """Compute initial values for all VI parameters"""
+        raise NotImplementedError('_initialize must be implemented by any '
+                                  'VIScheme subclass')
 
 
 class MultiPopVI(VIScheme):
-    def __init__(self, mixture_covs=None,
-                 num_random=0, **kwargs):
+    """
+    Standard VI scheme for GWAS across one or more populations
+
+    Implements all of the methods needed to fit a particular VIScheme where
+    cohorts are assumed to be independent given their true effect sizes.
+
+    See superclass for additional Fields and Methods
+
+    Fields:
+        num_mix: The number of mixture components in the prior
+        mixture_prec: List of the inverses of the covariance matrices for each
+            of the mixture components. Numpy array of shape
+            [num_mix][num_pops][num_pops][1]
+        log_det: Log determinants of each of covariances for each of the
+            mixture components.  Numpy array of shape
+            [num_mix]
+        vi_sigma: Optimal value of the variances for the variational family.
+            Numpy array of shape [num_mix][num_pops][num_pops][num_loci]
+        nat_sigma: -1/2 * inverse(vi_sigma). The natural parameterization of
+            the variances for the variational family.  A numpy array of shape
+            [num_mix][num_pops][num_pops][num_loci]
+        vi_sigma_log_det: Log determinants of each of the covariance matrices
+            in `vi_sigma`.  Numpy array of shape [num_mix][num_loci]
+        vi_sigma_matches: Traces of `mixture_prec` and `vi_sigma` -- used to
+            measure their discrepancy in computing KL divergences.
+        vi_sigma_summary: All of the terms involving only the covariance
+            matrices in the KL divergence between a Normal distributions with
+            covariance matrices `mixture_covs` and `vi_sigma`.
+        nat_grad_vi_delta: Optimal natural parameterization of the mixture
+            weights of the variational family.
+    """
+    def __init__(self, mixture_covs=None, **kwargs):
+        """
+        Initialize a MultiPopVI scheme
+
+        See superclass initialization for arguments.
+        """
         num_pops = kwargs['marginal_effects'].shape[0]
         for mc in mixture_covs:
             assert mc.shape == (num_pops, num_pops)
@@ -429,6 +662,7 @@ class MultiPopVI(VIScheme):
         self.nat_grad_vi_delta = None
 
     def _nat_to_not_vi_delta(self, params):
+        """Convert natural parameterization of delta to delta"""
         vi_mu, vi_delta, hyper_delta = params
         nat_mu = numerics.fast_nat_inner_product_m2(vi_mu, self.nat_sigma)
         const_part = np.copy(self.vi_sigma_log_det.T)
@@ -439,6 +673,7 @@ class MultiPopVI(VIScheme):
         return vi_mu, vi_delta, hyper_delta
 
     def _initialize(self):
+        """Obtain starting values of the variational parameters"""
         real_mu = self.inverse_betas
         logging.info('Largest inverse_beta is %f', np.max(np.abs(real_mu)))
         missing = np.isclose(self.ld_diags, 0)
@@ -490,6 +725,7 @@ class MultiPopVI(VIScheme):
         return vi_mu, vi_delta, real_hyper_delta
 
     def _update_error_scaling(self, params):
+        """Update the standard error scaling hyperparameter"""
         VIScheme._update_error_scaling(self, params)
         variances = np.zeros((self.num_mix,
                               self.num_pops,
@@ -513,6 +749,7 @@ class MultiPopVI(VIScheme):
                               + self.vi_sigma_matches)
 
     def real_posterior_mean(self, vi_mu, vi_delta, hyper_delta):
+        """Compute the posterior mean in unscaled units"""
         return self._fast_einsum('kpi,ik,pi->pi',
                                  vi_mu,
                                  vi_delta,
@@ -520,6 +757,7 @@ class MultiPopVI(VIScheme):
                                  key='_real_posterior_mean1')
 
     def _posterior_mean(self, vi_mu, vi_delta, hyper_delta):
+        """Compute the posterior mean"""
         return numerics.fast_posterior_mean(vi_mu, vi_delta)
         # return self._fast_einsum('kpi,ik->pi',
         #                          vi_mu,
@@ -527,6 +765,7 @@ class MultiPopVI(VIScheme):
         #                          key='_posterior_mean1')
 
     def _posterior_marginal_variance(self, mean, vi_mu, vi_delta, hyper_delta):
+        """Compute the posterior variance at in each population at each SNP"""
         # mean_sq = self._posterior_mean(vi_mu, vi_delta, hyper_delta)**2
         temp = self._fast_einsum('kppi->kpi', self.vi_sigma, key='pmv1')
         # second_moment = self._fast_einsum('kpi,ik->pi',
@@ -537,6 +776,7 @@ class MultiPopVI(VIScheme):
 
     def _update_beta(self, vi_mu, vi_delta, hyper_delta, orig_obj, L,
                      idx, lsr):
+        """Take a natural gradient step for the variational family for beta"""
         if orig_obj is None:
             orig_obj = self._beta_objective((vi_mu, vi_delta, hyper_delta))
         # old_nat_mu = -2 * self._fast_einsum('spqi,sqi->spi',
@@ -592,6 +832,7 @@ class MultiPopVI(VIScheme):
                 hyper_delta), L, orig_obj, new_obj
 
     def _nat_grad_beta(self, vi_mu, vi_delta, hyper_delta):
+        """Compute the natural gradient of the variational family of beta"""
 
         post_mean = self._posterior_mean(vi_mu, vi_delta, hyper_delta)
 
@@ -613,6 +854,7 @@ class MultiPopVI(VIScheme):
 
     def _update_hyper_delta(self, vi_mu, vi_delta, hyper_delta,
                             orig_obj, L, idx, lsr):
+        """Update the mixture weights hyperparameter"""
         if orig_obj is None:
             # orig_obj = self._hyper_delta_objective(
             #     (vi_mu, vi_delta, hyper_delta)
@@ -657,14 +899,17 @@ class MultiPopVI(VIScheme):
 
     def _update_annotation(self, vi_mu, vi_delta, hyper_delta,
                            orig_obj, L, idx, lsr):
+        """In this VI scheme, this does nothing"""
         return (vi_mu, vi_delta,
                 hyper_delta), L, 0., 0.
 
     def _delta_KL(self, vi_mu, vi_delta, hyper_delta):
+        """The KL divergence of the mixture weights distributions"""
         return numerics.fast_delta_kl(vi_delta, hyper_delta,
                                       np.copy(self.annotations))
 
     def _beta_KL(self, vi_mu, vi_delta, hyper_delta):
+        """The KL divergence of the beta distributions"""
         delta_comp = numerics.fast_delta_kl(vi_delta, hyper_delta,
                                             np.copy(self.annotations))
         inner_product_comp = numerics.fast_inner_product_comp(
@@ -680,4 +925,5 @@ class MultiPopVI(VIScheme):
         return beta_kl
 
     def _annotation_KL(self, *params):
+        """In this VI scheme, this does nothing"""
         return 0.

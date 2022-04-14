@@ -228,6 +228,7 @@ def _main():
             ld_mats=combined_ld,
             mixture_covs=cross_pop_covs,
             annotations=annotations,
+            checkpoint=(args.checkpoint_freq > 0),
             checkpoint_freq=args.checkpoint_freq,
             output=args.output,
             scaled=args.scaled,
