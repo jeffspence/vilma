@@ -12,7 +12,7 @@ Classes:
 import logging
 import numpy as np
 from vilma import numerics
-from vilma.matrix_structure import BlockDiagonalMatrix
+from vilma import matrix_structures
 
 
 L_MAX = 1e12        # sets minimum natural gradient stepsize is 1/L_MAX
@@ -183,7 +183,7 @@ class VIScheme():
         if len(ld_mats) != self.num_pops:
             raise ValueError('Fewer LD matrices than populations.')
         for ld in ld_mats:
-            if not isinstance(ld, BlockDiagonalMatrix):
+            if not isinstance(ld, matrix_structures.BlockDiagonalMatrix):
                 raise ValueError('LD Matrices must be '
                                  'of type BlockDiagonalMatrix.')
         self.ld_diags = np.concatenate(
@@ -221,6 +221,7 @@ class VIScheme():
         self.init_hg = init_hg
         self.gwas_N = gwas_N
         self.num_its = num_its
+        self.param_names = None
 
         # store adjusted marginal effects S^{-1}XX^{-1}S^{-1}\hat{beta}
         # Note that if X is not full rank, then this is not the same as
@@ -345,7 +346,7 @@ class VIScheme():
                 ckp_post_mean = self.real_posterior_mean(*checkpoint_params)
                 fname = '{}.{}'.format(self.checkpoint_path, num_its)
                 dump_dict = dict(zip(self.param_names, params))
-                dump_dict['marginal'] = self.marginal_effects,
+                dump_dict['marginal'] = self.marginal_effects
                 dump_dict['stderr'] = self.std_errs
                 dump_dict['annotations'] = self.annotations
                 np.savez(fname, **dump_dict)
@@ -531,6 +532,11 @@ class VIScheme():
         """Compute initial values for all VI parameters"""
         raise NotImplementedError('_initialize must be implemented by any '
                                   'VIScheme subclass')
+
+    def _nat_to_not_vi_delta(self, params):
+        """Obtain up-to-date params based on current params"""
+        raise NotImplementedError('_nat_to_not_vi_delta must be implemented '
+                                  'by any VIScheme subclass.')
 
 
 class MultiPopVI(VIScheme):
