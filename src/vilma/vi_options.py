@@ -1,6 +1,5 @@
 """Constructs parsers for the command line interface. Calls optimizer"""
 import logging
-import argparse
 import itertools
 import pickle
 import numpy as np
@@ -8,14 +7,14 @@ from vilma.variational_inference import MultiPopVI
 from vilma import load
 
 
-def _main():
-    # Build command line arguments
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument('--logfile', required=False, type=str, default='',
-                        help='File to store information about the run. '
-                             'To print to stdout use "-". Defaults to '
-                             'no logging.')
+def args(super_parser):
+    parser = super_parser.add_parser(
+        'fit',
+        description='Use variational inference to learn '
+                    'effect sizes and effect size distribution '
+                    'from GWAS summary data.',
+        usage='vilma fit <options>',
+    )
     parser.add_argument('-K', '--components', default=12, type=int,
                         help='number of mixture components in prior')
     parser.add_argument('--num-its', default=1000, type=int,
@@ -76,16 +75,11 @@ def _main():
     parser.add_argument('--checkpoint-freq', type=int, default=-1,
                         help='Store the model once every this many '
                              'iterations. Defaults to no checkpointing.')
+    return parser
 
-    args = parser.parse_args()
 
+def main(args):
     np.random.seed(args.seed)
-
-    # Set up logging
-    if args.logfile == '-':
-        logging.basicConfig(level=50)
-    elif args.logfile:
-        logging.basicConfig(filename=args.logfile, level=50)
 
     if (not args.trait
             and args.ld_schema.count(',') != 1
@@ -302,7 +296,3 @@ def _make_simple(num_pops, num_components, mins, maxes):
                     cross_pop_covs.append(scale.dot(mat.dot(scale)))
 
     return cross_pop_covs
-
-
-if __name__ == '__main__':
-    _main()

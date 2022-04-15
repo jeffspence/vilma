@@ -3,24 +3,25 @@ Utilities for building a block LD matrix from genotype data
 """
 import os
 import logging
-from argparse import ArgumentParser
 import plinkio.plinkfile
 import numpy as np
 import pandas as pd
 from vilma import matrix_structures
 
 
-def _arguments():
+def args(super_parser):
     """Build command line arguments"""
-    parser = ArgumentParser()
+    parser = super_parser.add_parser(
+        'make_ld_schema',
+        description='Build a block diagonal LD matrix from '
+                    'genotype data and store it in vilma format.',
+        usage='vilma make_ld_schema <options>',
+    )
+
     parser.add_argument('-o', '--out-root', required=True, type=str,
                         help='Path for output schema')
     parser.add_argument('-b', '--block-file', required=True, type=str,
                         help='Bed file containing LD block boundaries')
-    parser.add_argument('-p', '--plink-file-list', required=True, type=str,
-                        help='A file where each line is the basename of '
-                             'plink format genotype data for a single '
-                             'chromosome.')
     parser.add_argument('-p', '--plink-file-list', required=True, type=str,
                         help='A file where each line is the basename of '
                              'plink format genotype data for a single '
@@ -35,7 +36,7 @@ def _arguments():
                              'then setting to x guarantees that SNPs with '
                              'r^2 greater than x will be linearly independent '
                              'in the resulting decomposition.')
-    return parser.parse_args()
+    return parser
 
 
 def _get_ld_blocks(bedfile_name):
@@ -136,9 +137,7 @@ def _assign_to_blocks(blocks, plink_data, variants=None):
     return blocked_data
 
 
-def _main():
-    args = _arguments()
-
+def main(args):
     logging.info('Reading LD blocks from %s', args.b)
     ld_blocks = _get_ld_blocks(args.b)
 
@@ -170,7 +169,3 @@ def _main():
             _process_blocks(blocked_data, args.o, ldthresh=args.ldthresh)
 
     logging.info('Done!')
-
-
-if __name__ == '__main__':
-    _main()

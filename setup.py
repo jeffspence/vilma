@@ -16,4 +16,7 @@ setuptools.setup(
                       'pandas>=0.23.4',
                       'tables>=3.3.0',
                       'pytest>=3.0.7'],
+    entry_points={
+        'console_scripts': ['vilma = vilma.frontend:main'],
+    },
 )
