@@ -231,7 +231,10 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
                         raise ValueError('Bad LD matrix.')
                     u_mat = np.copy(ld_matrix[0:num_snps])
                     s_vec = np.copy(ld_matrix[num_snps])
-                    v_mat = np.copy(ld_matrix[(num_snps+1):])
+                    v_mat = np.copy(ld_matrix[(num_snps+1):]).T
+
+                    u_mat = u_mat[variant_indices, :]
+                    v_mat = v_mat[:, variant_indices]
 
                     u_mat = signs.reshape((-1, 1)) * u_mat
                     v_mat = signs.reshape((1, -1)) * v_mat

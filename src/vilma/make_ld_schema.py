@@ -74,7 +74,7 @@ def _process_blocks(blocked_data, outfile_name, ldthresh=-1):
                                                         t=ldthresh)
             corrmat = np.vstack([trunc_mat.u,
                                  trunc_mat.s.reshape((1, -1)),
-                                 trunc_mat.v])
+                                 trunc_mat.v.T])
         np.save(outpath.format(*key.split()), corrmat)
         with open(var_outpath.format(*key.split()), 'w') as ofh:
             for var in blocked_data[key]['IDs']:
@@ -87,7 +87,7 @@ def _process_blocks(blocked_data, outfile_name, ldthresh=-1):
         ofh.write('\n'.join(legend))
 
 
-def _assign_to_blocks(blocks, plink_data, variants=None, ldthresh=-1):
+def _assign_to_blocks(blocks, plink_data, variants=None):
     """Pull genotype data from `plink_data` and assign SNPs to blocks"""
     blocked_data = {}
     blocked_ids = {}
@@ -144,14 +144,14 @@ def _main():
 
     variants = None
     if args.extract:
-        logging.info('Loading Variants from', args.extract)
+        logging.info('Loading Variants from %s', args.extract)
         variants = pd.read_csv(args.extract,
                                delim_whitespace=True,
                                header=0)
         if 'ID' not in variants.columns:
             raise ValueError(args.extract + ' must contain '
                              'a column labeled ID')
-            variants = set(variants['ID'])
+        variants = set(variants['ID'])
     if os.path.exists(args.o + '.schema'):
         raise ValueError(args.o + 'schema already exists. '
                          'Please delete before running.')
@@ -167,7 +167,7 @@ def _main():
             blocked_data = _assign_to_blocks(ld_blocks, plink_data, variants)
 
             logging.info('...processing LD blocks')
-            _process_blocks(blocked_data, args.o)
+            _process_blocks(blocked_data, args.o, ldthresh=args.ldthresh)
 
     logging.info('Done!')
 
