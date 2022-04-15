@@ -57,8 +57,9 @@ class VIScheme():
             computations
         ld_mats: [num_pops] length list of BlockDiagonalMatrix objects that
             represent the LD matrix in each populations
-        annotations: a [num_loci][num_annotations] numpy array one-hot encoded
-            representation of which annotation each SNP belongs to.
+        annotations: A [num_SNPs] integer numpy array containing the label
+            of which annotation each SNP belongs to. For example, if
+            annotations[i] is 0 then SNP i is in the zero'th annotation.
         annotation_counts: Total number of SNPs belonging to each annotation
         checkpoint_freq: Number of iterations between saving all VI and model
             parameters
@@ -118,9 +119,8 @@ class VIScheme():
             ld_mats: A [num_populations] long list containing
                 BlockDiagonalMatrix objects that represent the LD matrix within
                 each population
-            annotations: A [num_SNPs] integer numpy array containing the label
-                of which annotation each SNP belongs to. For example, if
-                annotations[i] is 0 then SNP i is in the zero'th annotation.
+            annotations: a [num_loci][num_annotations] numpy array one-hot
+                encoded representation of which annotation each SNP belongs to.
             mixture_covs: A [num_mixture_components][num_pops][num_pops] numpy
                 array, where mixture_covs[k] represents the k'th covariance
                 matrix in the prior.
@@ -661,26 +661,33 @@ class MultiPopVI(VIScheme):
             self.annotations,
             self.num_annotations
         )
-        real_hyper_delta += 1. / self.num_loci
+        real_hyper_delta += 1.
         real_hyper_delta /= np.sum(real_hyper_delta, axis=1, keepdims=True)
         real_hyper_delta = np.maximum(real_hyper_delta, numerics.EPSILON)
-
-        vi_mu = np.einsum('k,pi->kpi',
-                          np.ones(self.num_mix),
-                          fake_mu)
 
         nat_vi_delta = numerics.fast_vi_delta_grad(
             real_hyper_delta,
             self.log_det,
             self.annotations
         )
+        avg_mats = np.einsum('kpqi,ik->ipq',
+                             self.vi_sigma,
+                             vi_delta)
+        inv_avg_mats = np.linalg.inv(avg_mats)
+
+        temp_nat_mu = np.einsum('pi,iqp->qi',
+                                fake_mu,
+                                inv_avg_mats)
+
+        vi_mu = np.einsum('kqpi,pi->kqi',
+                          self.vi_sigma,
+                          temp_nat_mu)
+
         self.nat_grad_vi_delta = nat_vi_delta
-        const_part = np.copy(self.vi_sigma_log_det.T)
-        nat_mu = numerics.fast_nat_inner_product_m2(vi_mu, self.nat_sigma)
-        vi_delta = numerics.fast_invert_nat_vi_delta(vi_mu,
-                                                     nat_mu,
-                                                     const_part,
-                                                     nat_vi_delta,)
+
+        _, vi_delta, _ = self._nat_to_not_vi_delta(
+            (vi_mu, vi_delta, real_hyper_delta)
+        )
 
         return vi_mu, vi_delta, real_hyper_delta
 
@@ -753,7 +760,7 @@ class MultiPopVI(VIScheme):
             new_obj = self._beta_objective((new_mu, new_vi_delta, hyper_delta))
             logging.info('...Old objective = %f, new objective = %f',
                          orig_obj, new_obj)
-            if new_obj >= orig_obj:
+            if new_obj >= orig_obj - REL_TOL*np.abs(orig_obj) - ABS_TOL:
                 if L[idx] > L_MAX:
                     if not np.isclose(orig_obj, new_obj):
                         raise RuntimeError('Encountered a numerical error.')

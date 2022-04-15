@@ -1,11 +1,12 @@
-import numpy as np
 import os
 import plinkio.plinkfile
 from pytest import raises
+import numpy as np
 from vilma import matrix_structures as mat_structs
 from vilma import load
 from vilma import make_ld_schema
 from vilma import numerics
+from vilma import variational_inference
 
 
 # everything should be relative to this files directory
@@ -1060,3 +1061,624 @@ def test_vi_sigma_log_det():
         numerics.vi_sigma_log_det(x),
         true
     )
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+# test variational_inference.py
+
+
+def make_vischeme(checkpoint, num_annotations, scaled, scale_se):
+    betas = np.arange(100).reshape(2, 50).astype(float)
+    std_errs = np.array([1]*50 + [2]*50).reshape(2, 50).astype(float)
+    ld_mat = (1+np.arange(50*50)).reshape(50, 50)/(50*50+1)
+    ld_mat = ld_mat + ld_mat.T + 5*np.eye(50)
+    diags = np.diag(1/np.sqrt(np.diag(ld_mat)))
+    ld_mat = diags @ ld_mat @ diags
+    ld_mat = mat_structs.LowRankMatrix(X=ld_mat, t=1.0)
+    ld_mats = [mat_structs.BlockDiagonalMatrix([ld_mat]),
+               mat_structs.BlockDiagonalMatrix([ld_mat])]
+    mixture_covs = [np.eye(2), 2*np.eye(2)]
+    if num_annotations == 2:
+        annotations = np.zeros((50, 2), dtype=int)
+        annotations[0:25, 0] = 1
+        annotations[25:, 1] = 1
+    else:
+        annotations = np.ones((50, 1), dtype=int)
+    gwas_n = np.array([100e3, 10e3])
+    init_hg = np.array([0.1, 0.9])
+    vischeme = variational_inference.MultiPopVI(
+        marginal_effects=betas,
+        std_errs=std_errs,
+        ld_mats=ld_mats,
+        mixture_covs=mixture_covs,
+        annotations=annotations,
+        checkpoint=checkpoint,
+        checkpoint_freq=-1,
+        output='test',
+        scaled=scaled,
+        scale_se=scale_se,
+        gwas_N=gwas_n,
+        init_hg=init_hg,
+        num_its=20
+    )
+    return vischeme
+
+
+def make_vischeme_unlinked(checkpoint, num_annotations, scaled, scale_se):
+    betas = np.arange(100).reshape(50, 2).T.astype(float)
+    std_errs = np.array([1.]*50 + [2.]*50).reshape(2, 50).astype(float)
+    ld_mat = np.eye(50)
+    ld_mat = mat_structs.LowRankMatrix(X=ld_mat, t=1.0)
+    ld_mats = [mat_structs.BlockDiagonalMatrix([ld_mat]),
+               mat_structs.BlockDiagonalMatrix([ld_mat])]
+    mixture_covs = [np.eye(2), 2*np.eye(2)]
+    if num_annotations == 2:
+        annotations = np.zeros((50, 2), dtype=int)
+        annotations[0:25, 0] = 1
+        annotations[25:, 1] = 1
+    else:
+        annotations = np.ones((50, 1), dtype=int)
+    gwas_n = np.array([100e3, 10e3])
+    init_hg = np.array([0.1, 0.9])
+    vischeme = variational_inference.MultiPopVI(
+        marginal_effects=betas,
+        std_errs=std_errs,
+        ld_mats=ld_mats,
+        mixture_covs=mixture_covs,
+        annotations=annotations,
+        checkpoint=checkpoint,
+        checkpoint_freq=-1,
+        output='test',
+        scaled=scaled,
+        scale_se=scale_se,
+        gwas_N=gwas_n,
+        init_hg=init_hg,
+        num_its=20
+    )
+    return vischeme
+
+
+def test_MultiPopVI_init():
+    vischeme = make_vischeme(checkpoint=False,
+                             num_annotations=2,
+                             scaled=False,
+                             scale_se=False)
+
+    betas = np.arange(100).reshape(2, 50).astype(float)
+    std_errs = np.array([1]*50 + [2]*50).reshape(2, 50).astype(float)
+    ld_mat = (1+np.arange(50*50)).reshape(50, 50)/(50*50+1)
+    ld_mat = ld_mat + ld_mat.T + 5*np.eye(50)
+    diags = np.diag(1/np.sqrt(np.diag(ld_mat)))
+    ld_mat = diags @ ld_mat @ diags
+    assert vischeme.num_pops == 2
+    assert vischeme.num_mix == 2
+    assert (set(vischeme.param_names)
+            == set(['vi_mu', 'vi_delta', 'hyper_delta']))
+    assert np.allclose(vischeme.mixture_prec[0, :, :, 0],
+                       np.eye(2))
+    assert np.allclose(vischeme.mixture_prec[1, :, :, 0],
+                       np.eye(2)*0.5)
+    assert vischeme.mixture_prec.shape == (2, 2, 2, 1)
+    assert np.allclose(
+        vischeme.log_det,
+        [0., 2*np.log(2)]
+    )
+    true_vi_sigma = np.zeros((2, 2, 2, 50))
+    true_vi_sigma[0, 0, 0, :] = 1/2
+    true_vi_sigma[0, 1, 1, :] = 4/5
+    true_vi_sigma[1, 0, 0, :] = 2/3
+    true_vi_sigma[1, 1, 1, :] = 4/3
+
+    true_nat_sigma = np.zeros((2, 2, 2, 50))
+    true_nat_sigma[0, 0, 0, :] = -1
+    true_nat_sigma[0, 1, 1, :] = -5/8
+    true_nat_sigma[1, 0, 0, :] = -3/4
+    true_nat_sigma[1, 1, 1, :] = -3/8
+
+    assert np.allclose(vischeme.vi_sigma, true_vi_sigma)
+    assert np.allclose(vischeme.nat_sigma, true_nat_sigma)
+
+    true_sigma_log_det = np.zeros((2, 50))
+    true_sigma_log_det[0, :] = np.log(2/5)
+    true_sigma_log_det[1, :] = np.log(8/9)
+    assert np.allclose(vischeme.vi_sigma_log_det, true_sigma_log_det)
+
+    true_matches = np.zeros((50, 2))
+    true_matches[:, 0] = 1/2 + 4/5
+    true_matches[:, 1] = 1/3 + 2/3
+    assert np.allclose(vischeme.vi_sigma_matches, true_matches)
+
+    true_summary = (np.array([0., 2*np.log(2)])
+                    - true_sigma_log_det.T
+                    + true_matches)
+    assert np.allclose(vischeme.sigma_summary, true_summary)
+
+    assert vischeme.nat_grad_vi_delta is None
+    assert not vischeme.scaled
+    assert np.allclose(vischeme.error_scaling, 1)
+    assert not vischeme.scale_se
+    assert vischeme.num_annotations == 2
+    assert np.allclose(vischeme.marginal_effects,
+                       np.arange(100).reshape(2, 50))
+    assert np.allclose(vischeme.std_errs,
+                       std_errs)
+    assert np.allclose(vischeme.scalings, 1)
+    assert np.allclose(vischeme.ld_diags, 1)
+    assert np.allclose(vischeme.scaled_ld_diags,
+                       std_errs**-2)
+    assert len(vischeme.ld_mats) == 2
+    assert vischeme.ld_mats[0].shape == (50, 50)
+    assert np.allclose(vischeme.ld_mats[0].diag(), 1)
+    assert np.allclose(vischeme.annotations[0:25], 0)
+    assert np.allclose(vischeme.annotations[25:], 1)
+    assert np.allclose(vischeme.annotation_counts, 25)
+    assert vischeme.checkpoint_freq == -1
+    assert vischeme.checkpoint_path == 'test-checkpoint'
+    assert np.allclose(vischeme.init_hg, [0.1, 0.9])
+    assert np.allclose(vischeme.gwas_N, [100e3, 10e3])
+    assert vischeme.num_its == 20
+    assert np.allclose(
+        vischeme.adj_marginal_effects[0],
+        (np.linalg.inv(ld_mat).dot(
+            ld_mat.dot(betas[0]/std_errs[0])))/std_errs[0]
+    )
+    assert np.allclose(
+        vischeme.adj_marginal_effects[1],
+        (np.linalg.inv(ld_mat).dot(
+            ld_mat.dot(betas[1]/std_errs[1])))/std_errs[1]
+    )
+    assert np.allclose(
+        vischeme.chi_stat[0],
+        betas[0].dot(np.linalg.inv(ld_mat).dot(
+            betas[0]/std_errs[0])/std_errs[0]
+        )
+    )
+    assert np.allclose(
+        vischeme.chi_stat[1],
+        betas[1].dot(np.linalg.inv(ld_mat).dot(
+            betas[1]/std_errs[1])/std_errs[1]
+        )
+    )
+
+    assert np.allclose(vischeme.ld_ranks, 50)
+
+    true_ridge_betas = np.zeros((2, 50))
+    prior = (2 * np.array([100e3, 10e3]) * np.array([0.1, 0.9])
+             / (std_errs**-2).sum(axis=1))
+    temp = ld_mat.dot(np.linalg.inv(ld_mat).dot((betas / std_errs).T)).T
+
+    for p in range(2):
+        true_ridge_betas[p, :] = np.linalg.inv(
+            ld_mat + np.diag(std_errs[p]**2)/prior[p]
+        ).dot(temp[p]) * std_errs[p]
+
+    assert np.allclose(vischeme.inverse_betas, true_ridge_betas)
+
+
+def test_MultiPopVI_init_flags():
+    vischeme = make_vischeme(checkpoint=True,
+                             num_annotations=2,
+                             scaled=False,
+                             scale_se=False)
+    assert vischeme.checkpoint
+    vischeme = make_vischeme(checkpoint=False,
+                             num_annotations=2,
+                             scaled=False,
+                             scale_se=True)
+    assert vischeme.scale_se
+    vischeme = make_vischeme(checkpoint=False,
+                             num_annotations=2,
+                             scaled=True,
+                             scale_se=False)
+    assert vischeme.scaled
+
+    betas = np.arange(100).reshape(2, 50).astype(float)
+    std_errs = np.array([1]*50 + [2]*50).reshape(2, 50).astype(float)
+    ld_mat = (1+np.arange(50*50)).reshape(50, 50)/(50*50+1)
+    ld_mat = ld_mat + ld_mat.T + 5*np.eye(50)
+    diags = np.diag(1/np.sqrt(np.diag(ld_mat)))
+    ld_mat = diags @ ld_mat @ diags
+    assert np.allclose(vischeme.scalings, std_errs)
+    assert np.allclose(vischeme.adj_marginal_effects, betas/std_errs)
+    assert np.allclose(vischeme.std_errs, 1)
+    assert np.allclose(vischeme.scaled_ld_diags, 1)
+    true_ridge_betas = np.zeros((2, 50))
+    prior = 2 * np.array([100e3, 10e3]) * np.array([0.1, 0.9]) / 50
+    temp = ld_mat.dot(np.linalg.inv(ld_mat).dot((betas / std_errs).T)).T
+
+    for p in range(2):
+        true_ridge_betas[p, :] = np.linalg.inv(
+            ld_mat + np.diag(np.ones_like(std_errs[p]))/prior[p]
+        ).dot(temp[p])
+
+    assert np.allclose(vischeme.inverse_betas, true_ridge_betas)
+
+
+def test_MultiPopVI_fast_einsum():
+    vischeme = make_vischeme(False, 1, False, False)
+    x = np.random.random((3, 4, 5))
+    y = np.random.random((4, 5, 6))
+    test = vischeme._fast_einsum('ijk,jkl->ik',
+                                 x, y,
+                                 key='test_key')
+    assert 'test_key' in vischeme._einsum_paths.keys()
+    true_path = np.einsum_path('ijk,jkl->ik',
+                               x, y,
+                               optimize='optimal')[0]
+    assert vischeme._einsum_paths['test_key'] == true_path
+    true = np.einsum('ijk,jkl->ik', x, y)
+    assert np.allclose(true, test)
+    test2 = vischeme._fast_einsum('ijk,jkl->ik',
+                                  x, y,
+                                  key='test_key')
+    assert np.allclose(true, test2)
+
+
+def test_MultiPopVI_optimize():
+    vischeme = make_vischeme(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    params = (mu, delta, hyper)
+    new_params = vischeme.optimize()
+    assert vischeme.elbo(new_params) > vischeme.elbo(params)
+
+    vischeme = make_vischeme(False, 1, True, False)
+    mu, delta, hyper = vischeme._initialize()
+    params = (mu, delta, hyper)
+    new_params = vischeme.optimize()
+    assert vischeme.elbo(new_params) > vischeme.elbo(params)
+
+    vischeme = make_vischeme(False, 2, False, True)
+    mu, delta, hyper = vischeme._initialize()
+    params = (mu, delta, hyper)
+    new_params = vischeme.optimize()
+    assert vischeme.elbo(new_params) > vischeme.elbo(params)
+
+    vischeme = make_vischeme(False, 2, True, True)
+    mu, delta, hyper = vischeme._initialize()
+    params = (mu, delta, hyper)
+    new_params = vischeme.optimize()
+    assert vischeme.elbo(new_params) > vischeme.elbo(params)
+
+
+def test_MultiPopVI_nat_grad_step():
+    vischeme = make_vischeme_unlinked(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    params = (mu, delta, hyper)
+    (new_params, new_L, new_elbo_delta) = vischeme._nat_grad_step(
+        params, [1.0, 1., 1.], 2., None
+    )
+    assert new_L[0] == 1.
+    assert vischeme.elbo(new_params) > vischeme.elbo(params)
+
+    (new_params, new_L, new_elbo_delta) = vischeme._nat_grad_step(
+        params, [variational_inference.L_MAX-1, 1., 1.], 2., None
+    )
+    assert new_L[0] < variational_inference.L_MAX-1
+    assert vischeme.elbo(new_params) > vischeme.elbo(params)
+    assert np.allclose(params[0], new_params[0])
+
+
+def test_MultiPopVI_elbo():
+    vischeme = make_vischeme(False, 2, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    params = (mu, delta, hyper)
+    assert np.isclose(
+        vischeme.elbo(params),
+        vischeme._log_likelihood(params)
+        - vischeme._beta_KL(*params)
+        - vischeme._annotation_KL(*params)
+    )
+
+
+def test_MultiPopVI_optimize_step():
+    vischeme = make_vischeme_unlinked(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+
+    initial_nat_grad_vi_delta = np.copy(vischeme.nat_grad_vi_delta)
+    initial_vi_sigma = np.copy(vischeme.vi_sigma)
+    initial_nat_sigma = np.copy(vischeme.nat_sigma)
+    initial_vi_sigma_log_det = np.copy(vischeme.vi_sigma_log_det)
+
+    mu_copy = np.copy(mu)
+    delta_copy = np.copy(delta)
+    hyper_copy = np.copy(hyper)
+    params = (mu, delta, hyper)
+
+    init_delta = vischeme._nat_to_not_vi_delta(params)[1]
+    assert np.allclose(delta, init_delta)
+
+    (new_params, new_L, new_elbo_delta) = vischeme._nat_grad_step(
+        params, [1.0, 1., 1., 1., 1.], 2., None
+    )
+    assert np.allclose(mu, mu_copy)
+    assert np.allclose(delta, delta_copy)
+    assert np.allclose(hyper, hyper_copy)
+    assert np.allclose(params[0], mu_copy)
+    assert np.allclose(params[1], delta_copy)
+    assert np.allclose(params[2], hyper_copy)
+    assert np.allclose(vischeme.vi_sigma,
+                       initial_vi_sigma)
+    assert np.allclose(vischeme.nat_sigma,
+                       initial_nat_sigma)
+    assert np.allclose(vischeme.vi_sigma_log_det,
+                       initial_vi_sigma_log_det)
+
+    vischeme.nat_grad_vi_delta = initial_nat_grad_vi_delta
+    init_delta = vischeme._nat_to_not_vi_delta(params)[1]
+    assert np.allclose(init_delta, delta_copy)
+    (opt_params,
+     L_new, elbo, running_elbo_delta) = vischeme._optimize_step(
+        params, [1.0, 1., 1., 1., 1.], vischeme.elbo(params),
+         line_search_rate=2.
+    )
+    assert np.allclose(new_params[0], opt_params[0])
+    assert np.allclose(new_params[1], opt_params[1]), (new_params[1][0],
+                                                       opt_params[1][0])
+    assert np.allclose(new_params[2], opt_params[2])
+    assert np.isclose(elbo, vischeme.elbo(opt_params))
+
+
+def test_MultiPopVI_log_likelihood():
+    # Covered by numerics.fast_likelihood
+    pass
+
+
+def test_MultiPopVI_update_error_scaling():
+    vischeme = make_vischeme(False, 2, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    params = (mu, delta, hyper)
+
+    post_mean = vischeme._posterior_mean(mu, delta, hyper)
+    pmv = vischeme._posterior_marginal_variance(post_mean, mu, delta, hyper)
+
+    true_tau = np.zeros(2)
+    for p in range(2):
+        true_tau[p] = 1. / vischeme.ld_ranks[p] * (
+            vischeme.chi_stat[p]
+            - 2 * vischeme.adj_marginal_effects[p].dot(post_mean[p])
+            + post_mean[p].dot(
+                vischeme.ld_mats[p].dot(post_mean[p]/vischeme.std_errs[p])
+                / vischeme.std_errs[p]
+            )
+            + (vischeme.scaled_ld_diags[p] * pmv[p]).sum()
+        )
+
+    vischeme._update_error_scaling(params)
+
+    assert np.allclose(vischeme.error_scaling, true_tau)
+
+
+def test_MultiPopVI_beta_objective():
+    vischeme = make_vischeme(False, 2, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    params = (mu, delta, hyper)
+    assert np.isclose(vischeme._beta_objective(params),
+                      vischeme._log_likelihood(params)
+                      - vischeme._beta_KL(*params))
+
+
+def test_MultiPopVI_hyper_delta_objective():
+    vischeme = make_vischeme(False, 2, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    params = (mu, delta, hyper)
+    assert np.isclose(vischeme._hyper_delta_objective(params),
+                      -vischeme._delta_KL(*params)
+                      - vischeme._annotation_KL(*params))
+
+
+def test_MultiPopVI_annotation_objective():
+    vischeme = make_vischeme(False, 2, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    params = (mu, delta, hyper)
+    assert np.isclose(vischeme._annotation_objective(params),
+                      -vischeme._annotation_KL(*params))
+
+
+def test_MultiPopVI_annotation_KL():
+    vischeme = make_vischeme(checkpoint=False,
+                             num_annotations=2,
+                             scaled=False,
+                             scale_se=False)
+    assert vischeme._annotation_KL() == 0.
+
+
+def test_MultiPopVI_beta_KL():
+    vischeme = make_vischeme(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+
+
+def test_MultiPopVI_delta_KL():
+    vischeme = make_vischeme(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    assert np.isclose(
+        vischeme._delta_KL(mu, delta, hyper),
+        (delta * np.log(delta / hyper[0])).sum()
+    )
+
+    vischeme = make_vischeme(False, 2, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    assert np.isclose(
+        vischeme._delta_KL(mu, delta, hyper),
+        (delta * np.log(delta / hyper[0])).sum()
+    )
+
+
+def test_MultiPopVI_update_annotation():
+    vischeme = make_vischeme(False, 1, False, False)
+    L = 3
+    mu, delta, hyper = vischeme._initialize()
+    ((new_mu, new_delta, new_hyper),
+     new_L,
+     old_obj,
+     new_obj) = vischeme._update_annotation(mu, delta, hyper, 0., L, 0, 0)
+    assert new_L == L
+    assert old_obj == new_obj
+    assert np.allclose(new_mu, mu)
+    assert np.allclose(new_delta, delta)
+    assert np.allclose(new_hyper, hyper)
+
+
+def test_MultiPopVI_update_hyper_delta():
+    vischeme = make_vischeme_unlinked(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    ((new_mu, new_delta, new_hyper),
+     L, orig_obj, new_obj) = vischeme._update_hyper_delta(
+         mu, delta, hyper, None, [1.], 0, 1.25
+     )
+
+    assert L[0] == 1
+    assert new_obj > orig_obj
+    assert np.allclose(mu, new_mu)
+    assert np.allclose(delta.mean(axis=0), new_hyper[0])
+
+    vischeme = make_vischeme_unlinked(False, 2, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    ((new_mu, new_delta, new_hyper),
+     L, orig_obj, new_obj) = vischeme._update_hyper_delta(
+         mu, delta, hyper, None, [1.], 0, 1.25
+     )
+
+    assert L[0] == 1
+    assert new_obj > orig_obj
+    assert np.allclose(mu, new_mu)
+    assert np.allclose(delta[0:25].mean(axis=0), new_hyper[0])
+    assert np.allclose(delta[25:].mean(axis=0), new_hyper[1])
+
+
+def test_MultiPopVI_update_beta():
+    vischeme = make_vischeme_unlinked(False, 1, False, False)
+    # For unlinked, should be able to take full natural gradient step
+    mu, delta, hyper = vischeme._initialize()
+    ((new_mu, new_delta, new_hyper),
+     L, orig_obj, new_obj) = vischeme._update_beta(
+         mu, delta, hyper, None, [1.], 0, 1.25
+     )
+
+    assert L[0] == 1
+    assert new_obj > orig_obj
+    assert np.allclose(new_hyper, hyper)
+
+    # And it should be "idempotent"
+    ((second_mu, second_delta, second_hyper),
+     L, orig_obj, new_obj) = vischeme._update_beta(
+         new_mu, new_delta, new_hyper, None, [1.], 0, 1.25
+     )
+
+    assert np.isclose(new_obj, orig_obj)
+    assert np.allclose(new_mu, second_mu)
+    assert np.allclose(new_delta, second_delta)
+    assert np.allclose(new_hyper, second_hyper)
+
+
+def test_MultiPopVI_posterior_marginal_variance():
+    vischeme = make_vischeme(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    post_mean = vischeme._posterior_mean(mu, delta, hyper)
+    second_moment = np.einsum('kpi,ik->pi',
+                              mu**2 + vischeme.vi_sigma[:, [0, 1], [0, 1], :],
+                              delta)
+    assert np.allclose(
+        vischeme._posterior_marginal_variance(post_mean, mu, delta, hyper),
+        second_moment - post_mean**2
+    )
+    vischeme = make_vischeme(False, 1, True, False)
+    mu, delta, hyper = vischeme._initialize()
+    post_mean = vischeme._posterior_mean(mu, delta, hyper)
+    second_moment = np.einsum('kpi,ik->pi',
+                              mu**2 + vischeme.vi_sigma[:, [0, 1], [0, 1], :],
+                              delta)
+    assert np.allclose(
+        vischeme._posterior_marginal_variance(post_mean, mu, delta, hyper),
+        second_moment - post_mean**2
+    )
+
+
+def test_MultiPopVI_posterior_mean():
+    vischeme = make_vischeme_unlinked(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    post_mean = vischeme._posterior_mean(mu, delta, hyper)
+    assert np.allclose(
+        post_mean,
+        np.einsum('kpi,ik->pi', mu, delta)
+    )
+    vischeme = make_vischeme_unlinked(False, 1, True, False)
+    mu, delta, hyper = vischeme._initialize()
+    post_mean = vischeme._posterior_mean(mu, delta, hyper)
+    assert np.allclose(
+        post_mean,
+        np.einsum('kpi,ik->pi', mu, delta)
+    )
+
+
+def test_MultiPopVI_real_posterior_mean():
+    vischeme = make_vischeme_unlinked(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    post_mean = vischeme.real_posterior_mean(mu, delta, hyper)
+    assert np.allclose(
+        post_mean,
+        np.einsum('kpi,ik->pi', mu, delta)
+    )
+
+    vischeme = make_vischeme_unlinked(False, 1, True, False)
+    std_errs = np.array([1]*50 + [2]*50).reshape(2, 50).astype(float)
+    mu, delta, hyper = vischeme._initialize()
+    post_mean = vischeme.real_posterior_mean(mu, delta, hyper)
+    assert np.allclose(
+        post_mean,
+        np.einsum('kpi,ik,pi->pi', mu, delta, std_errs),
+    )
+
+
+def test_MultiPopVI_initialize():
+    # Initialization is somewhat arbitrary anyway
+    # This just checks to make sure it's sensible --
+    # if SNPs are unlinked no SNPs should change sign
+    # and all SNPs should have true effects smaller than
+    # observed effects.  SNPs with larger observations
+    # should have large true effects
+    vischeme = make_vischeme_unlinked(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    betas = np.arange(100).reshape(50, 2).T.astype(float)
+    assert np.all(np.abs(mu[0, :, 1:]) < np.abs(betas[:, 1:]))
+    assert np.all(np.abs(mu[1, :, 1:]) < np.abs(betas[:, 1:]))
+    assert np.all((betas[:, 1:] < 0)[(mu[0, :, 1:] < 0)])
+    assert np.all((betas[:, 1:] > 0)[(mu[0, :, 1:] > 0)])
+    assert np.all((betas[:, 1:] < 0)[(mu[1, :, 1:] < 0)])
+    assert np.all((betas[:, 1:] > 0)[(mu[1, :, 1:] > 0)])
+    assert np.all(np.diff(mu[0, 0, :]) > 0)
+    assert np.all(np.diff(mu[0, 1, :]) > 0)
+    assert np.all(np.diff(mu[1, 0, :]) > 0)
+    assert np.all(np.diff(mu[1, 1, :]) > 0)
+    assert np.all(hyper > 1/500)
+
+
+def test_MultiPopVI_nat_to_not_vi_delta():
+    vischeme = make_vischeme_unlinked(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    nat_deltas = vischeme.nat_grad_vi_delta
+    inv_vi_sigmas = numerics.vi_sigma_inv(vischeme.vi_sigma)
+    log_ratios = (
+        nat_deltas[:, 0]
+        + 0.5 * np.einsum('pi,pqi,qi->i',
+                          mu[0],
+                          inv_vi_sigmas[0],
+                          mu[0])
+        + 0.5 * vischeme.vi_sigma_log_det[0]
+        - 0.5 * np.einsum('pi,pqi,qi->i',
+                          mu[1],
+                          inv_vi_sigmas[1],
+                          mu[1])
+        - 0.5 * vischeme.vi_sigma_log_det[1]
+    )
+    true_deltas = numerics.invert_nat_cat_2D(log_ratios.reshape((-1, 1)))
+    new_mu, new_delta, new_hyper = vischeme._nat_to_not_vi_delta(
+        (mu, delta, hyper)
+    )
+    assert np.allclose(
+        true_deltas,
+        new_delta
+    )
+    assert np.allclose(mu, new_mu)
+    assert np.allclose(hyper, new_hyper)
