@@ -33,7 +33,11 @@ def load_variant_list(variant_filename):
     if 'A1' not in variants.columns:
         raise ValueError('Variant file must contain a column labeled A1')
     if 'A2' not in variants.columns:
-        raise ValueError('Variant file must contain a column labeled A2')
+        if 'REF' not in variants.columns or 'ALT' not in variants.columns:
+            raise ValueError('Variant file must contain a column labeled A2')
+        variants['A2'] = variants['REF'].copy()
+        flip = variants['A1'] == variants['REF']
+        variants.loc[flip, 'A2'] = variants.loc[flip, 'ALT'].copy()
 
     variants = variants[['ID', 'A1', 'A2']]
 
@@ -82,8 +86,13 @@ def load_sumstats(sumstats_filename, variants):
                          'labeled A1')
 
     if 'A2' not in sumstats.columns:
-        raise ValueError('Summary Statistics File must contain a column '
-                         'labeled A2')
+        if 'REF' not in sumstats.columns or 'ALT' not in sumstats.columns:
+            raise ValueError('If summary statistics file does not contain '
+                             'a column labeled A2, then it must contain REF '
+                             'and ALT columns.')
+        sumstats['A2'] = sumstats['REF'].copy()
+        flip = sumstats['A1'] == sumstats['REF']
+        sumstats.loc[flip, 'A2'] = sumstats.loc[flip, 'ALT'].copy()
 
     if 'SE' not in sumstats.columns:
         raise ValueError('Summary Statistics File must contain a column '
