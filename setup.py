@@ -12,9 +12,9 @@ setuptools.setup(
     author_email='jspence@stanford.edu',
     package_dir={'': 'src'},
     packages=setuptools.find_packages(where='src'),
-    install_requires=['numpy>=1.22.3',
+    install_requires=['numpy>=1.20.0',
                       'plinkio>=0.9.8',
-                      'pandas>=1.4.2',
+                      'pandas>=1.2.1',
                       'h5py>=3.6.0',
                       'numba>=0.53.1'],
     entry_points={
