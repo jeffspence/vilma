@@ -9,18 +9,12 @@ functions:
         and match to variants
 """
 import logging
-import sys
 from tempfile import TemporaryFile
 import numpy as np
 import pandas as pd
 import h5py
 from vilma.matrix_structures import LowRankMatrix
 from vilma.matrix_structures import BlockDiagonalMatrix
-
-
-logger = logging.getLogger()
-handler = logging.StreamHandler(sys.stdout)
-logger.addHandler(handler)
 
 
 def load_variant_list(variant_filename):
@@ -173,7 +167,7 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
 
             ld_shape = (snp_metadata.shape[0], snp_metadata.shape[0])
 
-            logger.info('LD matrix shape: %s', (ld_shape,))
+            logging.info('LD matrix shape: %s', (ld_shape,))
 
             variant_indices = np.copy(
                 snp_metadata.ID.isin(variants.ID).to_numpy()
@@ -216,8 +210,9 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
                 if len(ld_matrix.shape) == 0:
                     ld_matrix = ld_matrix[None, None]
                 if ld_matrix.shape[0] == ld_matrix.shape[1]:
-                    logger.info('Proportion of variant indices being used: %e',
-                                np.mean(variant_indices))
+                    logging.info('Proportion of variant indices '
+                                 'being used: %e',
+                                 np.mean(variant_indices))
 
                     accepted_matrix = np.copy(
                         ld_matrix[np.ix_(variant_indices, variant_indices)]
@@ -268,15 +263,15 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
         perm = np.array([], dtype=float)
     missing = set(np.arange(variants.shape[0]).tolist()) - set(perm.tolist())
     missing = np.array(list(missing), dtype=int)
-    logger.info('Loaded a total of %d variants.')
-    logger.info('Missing LD info for %d variants. They will be ignored '
-                'during optimization.', len(missing))
-    logger.info('The alleles did not match for %d variants. They were '
-                'flipped', total_flipped)
+    logging.info('Loaded a total of %d variants.')
+    logging.info('Missing LD info for %d variants. They will be ignored '
+                 'during optimization.', len(missing))
+    logging.info('The alleles did not match for %d variants. They were '
+                 'flipped', total_flipped)
     perm = np.concatenate([perm, missing])
     if not np.all(perm == np.arange(len(perm))):
-        logger.info('The variants in the extract file and the variants in the '
-                    'LD matrix were not in the same order.')
+        logging.info('The variants in the extract file and the variants in '
+                     'the LD matrix were not in the same order.')
     perm = np.array(perm)
     block_mat = BlockDiagonalMatrix(svds, perm=perm, missing=missing)
 
