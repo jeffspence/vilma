@@ -1,0 +1,6 @@
+ID  BETA    SE  A1  A2
+SNP1    1.0 0.01    G   T
+SNP2    1.0 0.01    G   A
+SNP3    -1.0    0.01    C   T
+SNP4    0.5 0.05    T   G
+SNP5    -1.0    0.05    T   C

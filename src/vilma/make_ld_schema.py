@@ -41,7 +41,8 @@ def args(super_parser):
 
 def _get_ld_blocks(bedfile_name):
     """Load LD block locations from a bed file"""
-    ld_table = pd.read_csv(bedfile_name, names=['chrom', 'start', 'end'],
+    ld_table = pd.read_csv(bedfile_name,
+                           names=['chrom', 'start', 'end'],
                            comment='#',
                            delim_whitespace=True,
                            header=None,
@@ -66,7 +67,9 @@ def _get_ld_blocks(bedfile_name):
 def _process_blocks(blocked_data, outfile_name, ldthresh=-1):
     """Take genetic data and variant IDs, compute correlation and write"""
     outpath = outfile_name + '_{}:{}'
+    rel_outpath = outpath.split('/')[-1]
     var_outpath = outfile_name + '_{}:{}.var'
+    rel_var_outpath = var_outpath.split('/')[-1]
     legend = []
     for key in blocked_data:
         logging.info('...computing correlations for block %s',
@@ -82,9 +85,9 @@ def _process_blocks(blocked_data, outfile_name, ldthresh=-1):
         with open(var_outpath.format(*key.split()), 'w') as ofh:
             for var in blocked_data[key]['IDs']:
                 ofh.write('\t'.join(map(str, var)) + '\n')
-        legend.append(var_outpath.format(*key.split())
+        legend.append(rel_var_outpath.format(*key.split())
                       + '\t'
-                      + (outpath + '.npy').format(*key.split()))
+                      + (rel_outpath + '.npy').format(*key.split()))
 
     with open(outfile_name + '.schema', 'a') as ofh:
         ofh.write('\n'.join(legend))
@@ -113,7 +116,7 @@ def _assign_to_blocks(blocks, plink_data, variants=None):
         if block_idx < 0:
             continue
         # check if past the end of the block
-        if locus.bp_position >= blocks[chromosome].end[block_idx]:
+        if locus.bp_position > blocks[chromosome].end[block_idx]:
             continue
 
         key_str = '{} {}'.format(chromosome, block_idx)
@@ -140,8 +143,8 @@ def _assign_to_blocks(blocks, plink_data, variants=None):
 
 
 def main(args):
-    logging.info('Reading LD blocks from %s', args.b)
-    ld_blocks = _get_ld_blocks(args.b)
+    logging.info('Reading LD blocks from %s', args.block_file)
+    ld_blocks = _get_ld_blocks(args.block_file)
 
     variants = None
     if args.extract:
@@ -153,11 +156,11 @@ def main(args):
             raise ValueError(args.extract + ' must contain '
                              'a column labeled ID')
         variants = set(variants['ID'])
-    if os.path.exists(args.o + '.schema'):
-        raise ValueError(args.o + 'schema already exists. '
+    if os.path.exists(args.out_root + '.schema'):
+        raise ValueError(args.out_root + '.schema already exists. '
                          'Please delete before running.')
 
-    with open(args.p, 'r') as plink_manifest:
+    with open(args.plink_file_list, 'r') as plink_manifest:
         for idx, line in enumerate(plink_manifest):
             logging.info('Working on plink file %d', idx + 1)
             logging.info('...reading data')
@@ -168,6 +171,8 @@ def main(args):
             blocked_data = _assign_to_blocks(ld_blocks, plink_data, variants)
 
             logging.info('...processing LD blocks')
-            _process_blocks(blocked_data, args.o, ldthresh=args.ldthresh)
+            _process_blocks(blocked_data,
+                            args.out_root,
+                            ldthresh=args.ldthresh)
 
     logging.info('Done!')

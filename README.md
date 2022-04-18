@@ -130,9 +130,12 @@ not the PLINK `.bed`).
 To build an LD matrix, run
 
 ```
-vilma make_ld_schema --logfile <log_file_name> --out-root <output_path_root> \
-    --extract <snp_file> --blockfile <block_file> \
-    --plink-file-list <plink_path_file> --ldthresh <t>
+vilma make_ld_schema --logfile <log_file_name> \
+    --out-root <output_path_root> \
+    --extract <snp_file> \
+    --block-file <block_file> \
+    --plink-file-list <plink_path_file> \
+    --ldthresh <t>
 ```
 
 `<log_file_name>` is the name of a file to store logging information that `vilma`
@@ -353,7 +356,8 @@ the summary statistics files, LD matrices, etc... were passed to `vilma fit`.
 Example
 -------
 
-For an example workflow running `vilma` see the `example` directory, where an LD matrix is built
+For an example workflow running `vilma` see `example.sh`
+in the `example/` directory, where an LD matrix is built
 from genotype data using `vilma make_ld_schema` and then the model is fit using
 `vilma fit`.
 

@@ -5,3 +5,4 @@ tests/*.swp
 tests/__pycache*
 *.swp
 tests/test_data/test_ld_mats*
+example/example_vilma_run*
