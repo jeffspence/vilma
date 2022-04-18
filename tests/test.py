@@ -716,31 +716,31 @@ def test_make_ld_schema():
     make_ld_schema._process_blocks(blocked_data, correct_path('test_ld_mats'))
     with open(correct_path('test_ld_mats.schema'), 'r') as fh:
         varfile, matfile = fh.readline().split()
-        assert varfile == correct_path('test_ld_mats_1:0.var')
-        assert matfile == correct_path('test_ld_mats_1:0.npy')
+        assert correct_path(varfile) == correct_path('test_ld_mats_1:0.var')
+        assert correct_path(matfile) == correct_path('test_ld_mats_1:0.npy')
         mat = np.load(correct_path('test_ld_mats_1:0.npy'))
         assert np.allclose(mat, np.ones_like(mat))
         assert len(mat.shape) == 2
         assert mat.shape[0] == 2
         assert mat.shape[1] == 2
-        with open(varfile, 'r') as vfh:
+        with open(correct_path(varfile), 'r') as vfh:
             assert vfh.readline() == '.\t1\t3\t0.0\tG\tT\n'
             assert vfh.readline() == '.\t1\t4\t0.0\tG\tA\n'
             assert not vfh.readline()
 
         varfile, matfile = fh.readline().split()
-        assert varfile == correct_path('test_ld_mats_1:1.var')
-        assert matfile == correct_path('test_ld_mats_1:1.npy')
+        assert correct_path(varfile) == correct_path('test_ld_mats_1:1.var')
+        assert correct_path(matfile) == correct_path('test_ld_mats_1:1.npy')
         mat = np.load(correct_path('test_ld_mats_1:1.npy'))
         assert np.allclose(mat, 1)
         assert len(mat) == 1
-        with open(varfile, 'r') as vfh:
+        with open(correct_path(varfile), 'r') as vfh:
             assert vfh.readline() == '.\t1\t9\t0.0\tC\tT\n'
             assert not vfh.readline()
 
         varfile, matfile = fh.readline().split()
-        assert varfile == correct_path('test_ld_mats_1:3.var')
-        assert matfile == correct_path('test_ld_mats_1:3.npy')
+        assert correct_path(varfile) == correct_path('test_ld_mats_1:3.var')
+        assert correct_path(matfile) == correct_path('test_ld_mats_1:3.npy')
         mat = np.load(correct_path('test_ld_mats_1:3.npy'))
         assert np.allclose(np.diag(mat), 1)
         assert len(mat.shape) == 2
@@ -748,7 +748,7 @@ def test_make_ld_schema():
         assert mat.shape[1] == 2
         assert np.isclose(mat[0, 1], -0.28867513)
         assert np.isclose(mat[1, 0], -0.28867513)
-        with open(varfile, 'r') as vfh:
+        with open(correct_path(varfile), 'r') as vfh:
             assert vfh.readline() == '.\t1\t962\t0.0\tT\tG\n'
             assert vfh.readline() == '.\t1\t975\t0.0\tT\tC\n'
             assert not vfh.readline()
@@ -769,8 +769,10 @@ def test_make_ld_schema_svd():
                                    ldthresh=1.)
     with open(correct_path('test_ld_mats_svd.schema'), 'r') as fh:
         varfile, matfile = fh.readline().split()
-        assert varfile == correct_path('test_ld_mats_svd_1:0.var')
-        assert matfile == correct_path('test_ld_mats_svd_1:0.npy')
+        assert (correct_path(varfile)
+                == correct_path('test_ld_mats_svd_1:0.var'))
+        assert (correct_path(matfile)
+                == correct_path('test_ld_mats_svd_1:0.npy'))
         mat = np.load(correct_path('test_ld_mats_svd_1:0.npy'))
         assert len(mat.shape) == 2
         assert mat.shape[0] == 5
@@ -779,26 +781,30 @@ def test_make_ld_schema_svd():
         s = mat[2]
         v = mat[3:].T
         assert np.allclose(u @ np.diag(s) @ v, 1)
-        with open(varfile, 'r') as vfh:
+        with open(correct_path(varfile), 'r') as vfh:
             assert vfh.readline() == '.\t1\t3\t0.0\tG\tT\n'
             assert vfh.readline() == '.\t1\t4\t0.0\tG\tA\n'
             assert not vfh.readline()
 
         varfile, matfile = fh.readline().split()
-        assert varfile == correct_path('test_ld_mats_svd_1:1.var')
-        assert matfile == correct_path('test_ld_mats_svd_1:1.npy')
+        assert (correct_path(varfile)
+                == correct_path('test_ld_mats_svd_1:1.var'))
+        assert (correct_path(matfile)
+                == correct_path('test_ld_mats_svd_1:1.npy'))
         mat = np.load(correct_path('test_ld_mats_svd_1:1.npy'))
         assert np.allclose(mat, 1)
         assert len(mat) == 3
         assert mat.shape[0] == 3
         assert mat.shape[1] == 1
-        with open(varfile, 'r') as vfh:
+        with open(correct_path(varfile), 'r') as vfh:
             assert vfh.readline() == '.\t1\t9\t0.0\tC\tT\n'
             assert not vfh.readline()
 
         varfile, matfile = fh.readline().split()
-        assert varfile == correct_path('test_ld_mats_svd_1:3.var')
-        assert matfile == correct_path('test_ld_mats_svd_1:3.npy')
+        assert (correct_path(varfile)
+                == correct_path('test_ld_mats_svd_1:3.var'))
+        assert (correct_path(matfile)
+                == correct_path('test_ld_mats_svd_1:3.npy'))
         mat = np.load(correct_path('test_ld_mats_svd_1:3.npy'))
         assert len(mat.shape) == 2
         assert mat.shape[0] == 5
@@ -812,7 +818,7 @@ def test_make_ld_schema_svd():
         assert np.allclose(np.diag(mat), 1)
         assert np.isclose(mat[0, 1], -0.28867513)
         assert np.isclose(mat[1, 0], -0.28867513)
-        with open(varfile, 'r') as vfh:
+        with open(correct_path(varfile), 'r') as vfh:
             assert vfh.readline() == '.\t1\t962\t0.0\tT\tG\n'
             assert vfh.readline() == '.\t1\t975\t0.0\tT\tC\n'
             assert not vfh.readline()
