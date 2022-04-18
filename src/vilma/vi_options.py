@@ -42,7 +42,7 @@ def args(super_parser):
                         help='Causes vilma to place a prior on '
                              'frequency-scaled effect sizes intead of '
                              'on effect sizes in their natural scaling.')
-    parser.add_argument('--ldthresh', required=False, default=0.0,
+    parser.add_argument('--ldthresh', required=False, default=1.0,
                         help='Threhold for singular value approximation of '
                              'LD matrix. Setting --ldthresh x guarantees '
                              'that SNPs with an r^2 of x or larger will be '

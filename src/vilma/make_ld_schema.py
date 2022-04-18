@@ -69,6 +69,8 @@ def _process_blocks(blocked_data, outfile_name, ldthresh=-1):
     var_outpath = outfile_name + '_{}:{}.var'
     legend = []
     for key in blocked_data:
+        logging.info('...computing correlations for block %s',
+                     key)
         corrmat = blocked_data[key]['SNPs'].corr().to_numpy()
         if ldthresh >= 0:
             trunc_mat = matrix_structures.LowRankMatrix(X=corrmat,
