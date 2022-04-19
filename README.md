@@ -369,5 +369,5 @@ If you use `vilma` please cite
 
 [Spence, J. P., Sinnott-Armstrong, N., Assimes, T. L., and Pritchard, J. K.
 A flexible modeling and inference framework for estimating variant effect sizes
-from GWAS summary statistics. _bioRxiv_]()
+from GWAS summary statistics. _bioRxiv_](https://www.biorxiv.org/content/10.1101/2022.04.18.488696v1)
 
