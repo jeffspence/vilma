@@ -106,6 +106,11 @@ The outputs of this process are described in
 
 ### Building an LD Matrix
 
+N.B. that in version 0.0.2 the file format for matrices with pre-computed
+SVDs changed.  This results in LD matrices using up about half as much
+memory on disk, but unfortunately requires that LD matrices built using
+version 0.0.1 will need to be recomputed if the `--ldthresh` option was used.
+
 The LD matrix for each cohort is (in principle) a `num_snps` x `num_smnps` matrix
 where entry `i, j` is the correlation between genotypes at SNP `i` and SNP `j`.
 In practice, `vilma` will be run on millions of SNPs and performing computations

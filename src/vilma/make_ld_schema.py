@@ -79,8 +79,7 @@ def _process_blocks(blocked_data, outfile_name, ldthresh=-1):
             trunc_mat = matrix_structures.LowRankMatrix(X=corrmat,
                                                         t=ldthresh)
             corrmat = np.vstack([trunc_mat.u,
-                                 trunc_mat.s.reshape((1, -1)),
-                                 trunc_mat.v.T])
+                                 trunc_mat.s.reshape((1, -1))])
         np.save(outpath.format(*key.split()), corrmat)
         with open(var_outpath.format(*key.split()), 'w') as ofh:
             for var in blocked_data[key]['IDs']:

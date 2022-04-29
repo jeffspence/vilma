@@ -227,15 +227,14 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
                                       hdf_file=hdf_file)
                     )
                 else:
-                    if ld_matrix.shape[0] % 2 != 1:
+                    if ld_matrix.shape[0] < ld_matrix.shape[1]:
                         raise ValueError('Bad LD matrix.')
-                    num_snps = (ld_matrix.shape[0] - 1)//2
-                    num_components = ld_matrix.shape[1]
-                    if num_snps < num_components:
+                    num_snps = (ld_matrix.shape[0] - 1)
+                    if num_snps != variant_indices.shape[0]:
                         raise ValueError('Bad LD matrix.')
                     u_mat = np.copy(ld_matrix[0:num_snps])
                     s_vec = np.copy(ld_matrix[num_snps])
-                    v_mat = np.copy(ld_matrix[(num_snps+1):]).T
+                    v_mat = np.copy(u_mat.T)
 
                     u_mat = u_mat[variant_indices, :]
                     v_mat = v_mat[:, variant_indices]
