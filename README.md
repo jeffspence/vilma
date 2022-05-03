@@ -8,6 +8,7 @@ polygenic scores using variational inference on GWAS summary statistics from mul
 * [Usage](#usage)
     * [Building an LD Matrix](#building-an-ld-matrix)
     * [Building a Polygenic Score](#building-a-polygenic-score)
+* [LD Matrices](#ld-matrices)
 * [Output File Formats](#output-file-formats)
 * [Example](#example)
 * [Citation](#citation)
@@ -124,7 +125,10 @@ series of variant files that list which SNPs are included in each submatrix.
 An overall "manifest" file contains the paths of all of these matrix and variant
 files.
 
-`vilma` can construct such a block diagonal matrix from 
+We have prebuilt LD matrices for several cohorts and sets of SNPs. Those are
+available for download as described [below](#ld-matrices).
+
+`vilma` can also construct such a block diagonal matrix from 
 [PLINK v1.9](https://www.cog-genomics.org/plink/1.9/formats)
 format genotype data (`.bim`, `.bed`,  and `.fam` files) and
 a file containing the limits of separate LD blocks
@@ -213,6 +217,7 @@ vilma fit --ld-schema <comma_delimited_list_of_manifest_files> \
     --samplesizes <comma_delimited_list_of_Ns> \
     --names <comma_delimited_list_of_cohort_names> \
     --learn-scaling \
+    --annotations <annotation_file> \
     --logfile <log_file> \
     --extract <snp_file>
 ```
@@ -288,6 +293,14 @@ and so on. The default is "0", "1", ...
 that accounts for improperly calibrated standard errors in the GWAS (e.g.,
 over-correcting or under-correcting for population structure).
 
+`--annotations <annotation_file>`  is option, and causes vilma to learn separate
+effect size distributions for each different annotation.  `<annotation_file>` 
+should be a whitespace delimited file with a column labeled `ID` that contains
+the SNP names and matches the LD schema and the `<snp_file>` passed to `--extract`.
+It should also contain a column labeled `ANNOTATION`.  This column can contain
+whatever labels you want, and SNPs with the same label in this column will
+be treated as having the same annotation.
+
 `<log_file_name>` is the name of a file to store logging information that `vilma`
 will output while running.  For `std-out` use `-`.
 
@@ -312,6 +325,54 @@ For a detailed description of these options (and additional options), run
 ```
 vilma fit --help
 ```
+
+LD Matrices
+----------
+
+We have precomputed LD matrices for three cohorts in each of two SNP sets
+(6 LD matrices).  The cohorts are African ancestry individuals in the UK
+Biobank, East Asian ancestry individuals in the UK Biobank and "white British"
+individuals in the UK Biobank.  The two SNP sets are approximately 1M SNPs
+from HapMapIII, as well as approximately 6M SNPs that are well-imputed in
+the UK Biobank. 
+
+The LD matrices are available from google drive, and can be downloaded using gdown (example below):
+
+| Cohort                | SNP Set      | Filesize | ID                                  | MD5                              |
+| ------                | -------      | -------- | ----------------                    | ---                              |
+| African Ancestries    | HapMap       | 1.3GB    | `11VJ8_Xaf59RHxv1kZj6uWW9amJuibrgO` | `95fee6e65d7002b4c9227deb1e55e51f` |
+| African Ancestries    | well-imputed | 59.7GB   | `12fqMj2AKeEvjadphTFacDYtK66srFVBI` | `f91d3e3ee44764feee3546503f574006` |
+| East Asian Ancestries | HapMap       | 1.7GB    | `1pnKEklPVSTydNjNuRZ_5D5xL4zRg1HDH` | `68cec1591ef41eac320a9ec479974c62` |
+| East Asian Ancestries | well-imputed | 42.4GB   | `1oZ4WXBn02Gc1UC1zRfhT44EGIXKSCgBV` | `3f3f2807f0993691eced7b54f76b5c39` |
+| white British         | HapMap       | 1.7GB    | `1EnczLWlfUmbnf0FZVnYf8pjGkbas9Na8` | `f171f2ec3f2116d2d59e50ad18f0b1fc` |
+| white British         | well-imputed | 35.5GB   | `1gbHBAakr7iw8g4rshCLANSE9-h3QqFAI` | `b06fa9690fa7d6642683f5c6ed882c3d` |
+
+
+As an example, we will download the LD matrices built using individuals of African Ancestries
+on the HapMapIII SNP set.  First we need to install `gdown`
+
+`pip install gdown`
+
+Now, we use `gdown` to download the relevant file by ID:
+
+`gdown 11VJ8_Xaf59RHxv1kZj6uWW9amJuibrgO`
+
+this will create a file `afr_hapmap.tar.gz` (or other appropriate name for a different cohort or SNP set).
+We can use `md5` to make sure that the file downloaded okay.  On a macbook, the command is `md5`, on an
+Ubuntu server it is `md5sum`.  Running
+
+`md5 afr_hapmap.tar.gz`
+
+should return `95fee6e65d7002b4c9227deb1e55e51f`.  If not, the file was not correctly downloaded.
+Finally, we need to extract this archive.  Please note that these extracted LD matrices will be
+somewhat larger than the original archive (HapMap SNP sets will be about 2-3GB, well-imputed SNP sets 
+will be about 60-70GB). To extract, run:
+
+`tar -xf afr_hapmap.tar.gz`
+
+which will create a directory `afr_hapmap/`.  The file `afr_hapmap/ld_manifest.txt` is then
+the LD schema that should be passed to `vilma fit`.
+
 
 Output File Formats
 ------------
