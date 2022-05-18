@@ -234,7 +234,7 @@ def main(args):
     params = elbo.optimize()
 
     # save model parameters
-    to_save = dict(zip(elbo.param_names, params))
+    to_save = elbo.create_dump_dict(params)
     to_save['vi_sigma'] = elbo.vi_sigma
     np.savez(args.output, **to_save)
 

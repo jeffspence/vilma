@@ -330,6 +330,13 @@ class VIScheme():
             np.sqrt(np.mean((new_post_mean - ckp_post_mean)**2))
         )
 
+    def create_dump_dict(self, params):
+        """"""
+        dump_dict = dict(zip(self.param_names, params))
+        dump_dict['error_scaling'] = self.error_scaling
+        dump_dict['scalings'] = self.scalings
+        return dump_dict
+
     def optimize(self):
         """Initialize params and optimize objective function"""
         params = self._initialize()
@@ -346,10 +353,7 @@ class VIScheme():
                 checkpoint_params = params
                 ckp_post_mean = self.real_posterior_mean(*checkpoint_params)
                 fname = '{}.{}'.format(self.checkpoint_path, num_its)
-                dump_dict = dict(zip(self.param_names, params))
-                dump_dict['marginal'] = self.marginal_effects
-                dump_dict['stderr'] = self.std_errs
-                dump_dict['annotations'] = self.annotations
+                dump_dict = self.create_dump_dict(params)
                 np.savez(fname, **dump_dict)
             line_search_rate = 2.
             new_params, L, elbo, running_elbo_delta = self._optimize_step(
