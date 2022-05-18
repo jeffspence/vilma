@@ -220,12 +220,6 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
                     accepted_matrix = accepted_matrix * np.outer(signs, signs)
                     accepted_matrix = accepted_matrix[np.ix_(~mismatch,
                                                              ~mismatch)]
-                    perm.append(idx[~mismatch])
-                    svds.append(
-                        LowRankMatrix(accepted_matrix,
-                                      ldthresh,
-                                      hdf_file=hdf_file)
-                    )
                 else:
                     if ld_matrix.shape[0] < ld_matrix.shape[1]:
                         raise ValueError('Bad LD matrix.')
@@ -234,25 +228,18 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
                         raise ValueError('Bad LD matrix.')
                     u_mat = np.copy(ld_matrix[0:num_snps])
                     s_vec = np.copy(ld_matrix[num_snps])
-                    v_mat = np.copy(u_mat.T)
 
                     u_mat = u_mat[variant_indices, :]
-                    v_mat = v_mat[:, variant_indices]
-
                     u_mat = signs.reshape((-1, 1)) * u_mat
-                    v_mat = signs.reshape((1, -1)) * v_mat
-
                     u_mat = np.copy(u_mat[~mismatch])
-                    v_mat = np.copy(v_mat[:, ~mismatch])
+                    accepted_matrix = (u_mat * s_vec).dot(u_mat.T)
 
-                    perm.append(idx[~mismatch])
-                    svds.append(
-                        LowRankMatrix(u=u_mat,
-                                      s=s_vec,
-                                      v=v_mat,
-                                      D=np.zeros(u_mat.shape[0]),
-                                      hdf_file=hdf_file)
-                    )
+                perm.append(idx[~mismatch])
+                svds.append(
+                    LowRankMatrix(accepted_matrix,
+                                  ldthresh,
+                                  hdf_file=hdf_file)
+                )
 
     # Need to add in variants that are not in the LD matrix
     # Set them to have massive variance

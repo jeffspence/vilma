@@ -329,6 +329,11 @@ vilma fit --help
 LD Matrices
 ----------
 
+NB in v.0.0.4 we fixed a serious bug in the loading of the precomputing LD matrices.
+Any `vilma` runs using precomputed LD matrices and a `vilma` version earlier than
+0.0.4 should be rerun.  Sorry!
+
+
 We have precomputed LD matrices for three cohorts in each of two SNP sets
 (6 LD matrices).  The cohorts are African ancestry individuals in the UK
 Biobank, East Asian ancestry individuals in the UK Biobank and "white British"
