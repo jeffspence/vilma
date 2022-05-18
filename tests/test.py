@@ -1741,6 +1741,44 @@ def test_MultiPopVI_real_posterior_mean():
     )
 
 
+def test_MultiPopVI_real_posterior_variance():
+    vischeme = make_vischeme_unlinked(False, 1, False, False)
+    mu, delta, hyper = vischeme._initialize()
+    post_var = vischeme.real_posterior_variance(mu, delta, hyper)
+    real_var = (np.einsum('kppi,ik->pi',
+                          vischeme.vi_sigma,
+                          delta)
+                + np.einsum('kpi,ik->pi',
+                            mu**2,
+                            delta)
+                - np.einsum('kpi,ik->pi',
+                            mu,
+                            delta)**2)
+    assert np.allclose(
+        post_var,
+        real_var
+    )
+
+    vischeme = make_vischeme_unlinked(False, 1, True, False)
+    std_errs = np.array([1]*50 + [2]*50).reshape(2, 50).astype(float)
+    mu, delta, hyper = vischeme._initialize()
+    post_var = vischeme.real_posterior_variance(mu, delta, hyper)
+    real_var = (np.einsum('kppi,ik->pi',
+                          vischeme.vi_sigma,
+                          delta)
+                + np.einsum('kpi,ik->pi',
+                            mu**2,
+                            delta)
+                - np.einsum('kpi,ik->pi',
+                            mu,
+                            delta)**2)
+    real_var *= std_errs**2
+    assert np.allclose(
+        post_var,
+        real_var
+    )
+
+
 def test_MultiPopVI_initialize():
     # Initialization is somewhat arbitrary anyway
     # This just checks to make sure it's sensible --

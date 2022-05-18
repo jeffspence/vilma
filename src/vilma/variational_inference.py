@@ -529,6 +529,11 @@ class VIScheme():
         raise NotImplementedError('real_posterior_mean must be implemented '
                                   'by any VIScheme subclass')
 
+    def real_posterior_variance(self, *params):
+        """Compute the marginal posterior variance in unscaled units"""
+        raise NotImplementedError('real_posterior_variance must be '
+                                  'implemented by any VIScheme subclass')
+
     def _initialize(self):
         """Compute initial values for all VI parameters"""
         raise NotImplementedError('_initialize must be implemented by any '
@@ -718,11 +723,16 @@ class MultiPopVI(VIScheme):
 
     def real_posterior_mean(self, vi_mu, vi_delta, hyper_delta):
         """Compute the posterior mean in unscaled units"""
-        return self._fast_einsum('kpi,ik,pi->pi',
-                                 vi_mu,
-                                 vi_delta,
-                                 self.scalings,
-                                 key='_real_posterior_mean1')
+        return (numerics.fast_posterior_mean(vi_mu, vi_delta)
+                * self.scalings)
+
+    def real_posterior_variance(self, vi_mu, vi_delta, hyper_delta):
+        """Compute the marginal posterior variance in unscaled units"""
+        mean = self._posterior_mean(vi_mu, vi_delta, hyper_delta)
+        pmv = self._posterior_marginal_variance(
+            mean, vi_mu, vi_delta, hyper_delta
+        )
+        return pmv * (self.scalings**2)
 
     def _posterior_mean(self, vi_mu, vi_delta, hyper_delta):
         """Compute the posterior mean"""

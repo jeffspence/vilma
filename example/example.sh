@@ -35,6 +35,7 @@ vilma fit --logfile - \
 	--sumstats example_data/example_gwas_sumstats.txt \
 	--output example_vilma_run \
 	--ld-schema ld_mat/example_schema.schema \
+	--seed 42 \
 	-K 81 \
 	--init-hg 0.2 \
 	--samplesizes 300e3 \
@@ -45,3 +46,7 @@ vilma fit --logfile - \
 # example_vilma_run.estimates.tsv should now contain
 # the posterior mean estimates you need to build
 # a PGS using PLINK!
+
+# example_vilma_run.estimates.tsv should also match
+# copy_of_example_vilma_run.estimates.tsv if
+# everything went well

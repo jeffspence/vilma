@@ -234,11 +234,16 @@ def main(args):
     params = elbo.optimize()
 
     # save model parameters
-    np.savez(args.output, **dict(zip(elbo.param_names, params)))
+    to_save = dict(zip(elbo.param_names, params))
+    to_save['vi_sigma'] = elbo.vi_sigma
+    np.savez(args.output, **to_save)
 
     # write posterior means in plink format
     for name, posterior in zip(names, elbo.real_posterior_mean(*params)):
         variants['posterior_' + name] = posterior
+
+    for name, pmv in zip(names, elbo.real_posterior_variance(*params)):
+        variants['posterior_variance_' + name] = pmv
     variants.to_csv(args.output + '.estimates.tsv', sep='\t', index=False)
 
 
