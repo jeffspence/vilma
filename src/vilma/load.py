@@ -262,7 +262,7 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
         perm = np.array([], dtype=float)
     missing = set(np.arange(variants.shape[0]).tolist()) - set(perm.tolist())
     missing = np.array(list(missing), dtype=int)
-    logging.info('Loaded a total of %d variants.')
+    logging.info('Loaded a total of %d variants.', variants.shape[0])
     logging.info('Missing LD info for %d variants. They will be ignored '
                  'during optimization.', len(missing))
     logging.info('The alleles did not match for %d variants. They were '

@@ -334,7 +334,10 @@ We have precomputed LD matrices for three cohorts in each of two SNP sets
 Biobank, East Asian ancestry individuals in the UK Biobank and "white British"
 individuals in the UK Biobank.  The two SNP sets are approximately 1M SNPs
 from HapMapIII, as well as approximately 6M SNPs that are well-imputed in
-the UK Biobank. 
+the UK Biobank.
+
+The SNP IDs in these matrices are in the format "chr:pos_ref_alt", for example,
+10:100479326_G_A .
 
 The LD matrices are available from google drive, and can be downloaded using gdown (example below):
 

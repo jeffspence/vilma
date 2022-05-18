@@ -116,7 +116,7 @@ class LowRankMatrix():
             v = v[keep, :]
 
         self.D = np.copy(D)
-        keep = np.abs(s) > (1e-12 * np.max(np.abs(s)))
+        keep = s > (1e-12 * np.max(s))
         if hdf_file is None:
             self.u = np.zeros((u.shape[0], keep.sum()))
             self.v = np.zeros((keep.sum(), v.shape[1]))
