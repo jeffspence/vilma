@@ -297,7 +297,8 @@ class VIScheme():
         logging.info('SE scaling is: %r', self.error_scaling)
         logging.info(
             'Max relative difference is: %e',
-            np.max(np.abs((new_post_mean - post_mean) / post_mean))
+            np.max(np.abs((new_post_mean - post_mean)
+                          / (post_mean + numerics.EPSILON)))
         )
         logging.info(
             'Max absolute difference is: %e',
@@ -314,7 +315,7 @@ class VIScheme():
         logging.info(
             'Max relative difference (checkpoint iterations) is: %e',
             np.max(np.abs((new_post_mean - ckp_post_mean)
-                          / ckp_post_mean))
+                          / (ckp_post_mean + numerics.EPSILON)))
         )
         logging.info(
             'Max absolute difference (checkpoint iterations) is: %e',
