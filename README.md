@@ -433,7 +433,9 @@ Example
 For an example workflow running `vilma` see `example.sh`
 in the `example/` directory, where an LD matrix is built
 from genotype data using `vilma make_ld_schema` and then the model is fit using
-`vilma fit`.
+`vilma fit`. An example on how to use checkpointing to save intermediate models
+and how to restart optimization using a saved model
+is also included, in `example/checkpoint_example.sh`.
 
 
 Citation

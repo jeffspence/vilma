@@ -337,9 +337,19 @@ class VIScheme():
         dump_dict['scalings'] = self.scalings
         return dump_dict
 
-    def optimize(self):
+    def optimize(self, loaded_checkpoint=None):
         """Initialize params and optimize objective function"""
-        params = self._initialize()
+        if loaded_checkpoint is None:
+            params = self._initialize()
+        else:
+            params = [loaded_checkpoint[p_name] for p_name in self.param_names]
+            try:
+                self.error_scaling = loaded_checkpoint['error_scaling']
+            except KeyError:
+                logging.info('Did not find "error_scaling" in the loaded '
+                             'checkpoint. That is okay, but we will have to '
+                             'assume that the error scalings are 1.')
+            self._set_state(params)
         converged = False
         elbo = self.elbo(params)
         running_elbo_delta = None
@@ -368,7 +378,7 @@ class VIScheme():
             converged = converged or np.isclose(running_elbo_delta, 0,
                                                 atol=ELBO_TOL,
                                                 rtol=0)
-            if num_its < 10:
+            if num_its < 10 and loaded_checkpoint is None:
                 converged = False
 
             self._dump_info(num_its, new_post_mean, post_mean, ckp_post_mean)
@@ -491,7 +501,7 @@ class VIScheme():
     def _annotation_KL(self, *params):
         """Compute KL divergence between VI and prior for annotations"""
         raise NotImplementedError('_annotation_KL must be implemented by '
-                                  'any VIScheme subclass')
+                                  'any VIScheme subclass.')
 
     def _beta_KL(self, *params):
         """Compute KL divergence between VI and prior for betas"""
@@ -501,52 +511,57 @@ class VIScheme():
     def _delta_KL(self, *params):
         """Compute KL divergence between VI and prior for mixture weights"""
         raise NotImplementedError('_delta_KL must be implemented by '
-                                  'any VIScheme subclass')
+                                  'any VIScheme subclass.')
 
     def _update_annotation(self, *params, orig_obj, L, idx, lsr):
         """Update VI distribution for annotations"""
         raise NotImplementedError('_update_annotation must be implemented by '
-                                  'any VIScheme subclass')
+                                  'any VIScheme subclass.')
 
     def _update_hyper_delta(self, *params, orig_obj, L, idx, lsr):
         """Update VI distribution for mixture weights"""
         raise NotImplementedError('_update_hyper_delta must be implemented by '
-                                  'any VIScheme subclass')
+                                  'any VIScheme subclass.')
 
     def _update_beta(self, *params, orig_obj, L, idx, lsr):
         """Update VI distribution for effect sizes"""
         raise NotImplementedError('_update_beta must be implemented by any '
-                                  'VIScheme subclass')
+                                  'VIScheme subclass.')
 
     def _posterior_marginal_variance(self, mean, *params):
         """Compute the posterior variance of each beta"""
         raise NotImplementedError('_posterior_marginal_variance must be '
-                                  'implemented by any VIScheme subclass')
+                                  'implemented by any VIScheme subclass.')
 
     def _posterior_mean(self, *params):
         """Compute the posterior mean of each beta"""
         raise NotImplementedError('_posterior_mean must be implemented '
-                                  'by any VIScheme subclass')
+                                  'by any VIScheme subclass.')
 
     def real_posterior_mean(self, *params):
         """Compute the posterior mean of each beta in unscaled space"""
         raise NotImplementedError('real_posterior_mean must be implemented '
-                                  'by any VIScheme subclass')
+                                  'by any VIScheme subclass.')
 
     def real_posterior_variance(self, *params):
         """Compute the marginal posterior variance in unscaled units"""
         raise NotImplementedError('real_posterior_variance must be '
-                                  'implemented by any VIScheme subclass')
+                                  'implemented by any VIScheme subclass.')
 
     def _initialize(self):
         """Compute initial values for all VI parameters"""
         raise NotImplementedError('_initialize must be implemented by any '
-                                  'VIScheme subclass')
+                                  'VIScheme subclass.')
 
     def _nat_to_not_vi_delta(self, params):
         """Obtain up-to-date params based on current params"""
         raise NotImplementedError('_nat_to_not_vi_delta must be implemented '
                                   'by any VIScheme subclass.')
+
+    def _set_state(self, params):
+        """Set any internal values as necessary given parameter values"""
+        raise NotImplementedError('_set_state must be implemented by any '
+                                  'VIScheme subclass.')
 
 
 class MultiPopVI(VIScheme):
@@ -610,25 +625,8 @@ class MultiPopVI(VIScheme):
 
         self.log_det = np.copy(self.log_det[:, 0])
 
-        variances = np.zeros((self.num_mix,
-                              self.num_pops,
-                              self.num_pops,
-                              self.num_loci), dtype=np.float64)
-        variances[:,
-                  np.arange(self.num_pops),
-                  np.arange(self.num_pops),
-                  :] = (self.std_errs ** -2 * self.ld_diags)
-        variances += self.mixture_prec
-        self.vi_sigma = numerics.vi_sigma_inv(variances)
-        self.nat_sigma = -0.5 * variances
-        self.vi_sigma_log_det = numerics.vi_sigma_log_det(self.vi_sigma)
-        self.vi_sigma_matches = self._fast_einsum('kpqd,kqpi->ik',
-                                                  self.mixture_prec,
-                                                  self.vi_sigma,
-                                                  key='vi_sigma_match')
-        self.sigma_summary = (self.log_det
-                              - self.vi_sigma_log_det.T
-                              + self.vi_sigma_matches)
+        self._set_vi_sigma()
+
         self.nat_grad_vi_delta = None
 
     def _nat_to_not_vi_delta(self, params):
@@ -701,9 +699,18 @@ class MultiPopVI(VIScheme):
 
         return vi_mu, vi_delta, real_hyper_delta
 
-    def _update_error_scaling(self, params):
-        """Update the standard error scaling hyperparameter"""
-        VIScheme._update_error_scaling(self, params)
+    def _set_state(self, params):
+        """Set any internal values as necessary given parameter values"""
+        vi_mu, vi_delta, hyper_delta = params
+        self._set_vi_sigma()
+        self.nat_grad_vi_delta = numerics.fast_vi_delta_grad(
+            hyper_delta,
+            self.log_det,
+            self.annotations
+        )
+
+    def _set_vi_sigma(self):
+        """Set vi_sigma to its fixed value."""
         variances = np.zeros((self.num_mix,
                               self.num_pops,
                               self.num_pops,
@@ -724,6 +731,11 @@ class MultiPopVI(VIScheme):
         self.sigma_summary = (self.log_det
                               - self.vi_sigma_log_det.T
                               + self.vi_sigma_matches)
+
+    def _update_error_scaling(self, params):
+        """Update the standard error scaling hyperparameter"""
+        VIScheme._update_error_scaling(self, params)
+        self._set_vi_sigma()
 
     def real_posterior_mean(self, vi_mu, vi_delta, hyper_delta):
         """Compute the posterior mean in unscaled units"""

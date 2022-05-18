@@ -75,6 +75,13 @@ def args(super_parser):
     parser.add_argument('--checkpoint-freq', type=int, default=-1,
                         help='Store the model once every this many '
                              'iterations. Defaults to no checkpointing.')
+    parser.add_argument('--load-checkpoint', type=str, default='', nargs=2,
+                        help='Load a saved checkpoint from which to resume '
+                             'optimization. To use, the first argument should '
+                             'be a .npz file containing the checkpoint and '
+                             'the second should be the .pkl file containing '
+                             'the covariance matrices.',
+                        metavar=('CHECKPOINT_FILE.npz', 'COVARIANCE_FILE.pkl'))
     return parser
 
 
@@ -172,44 +179,48 @@ def main(args):
     betas = np.concatenate(combined_betas, axis=0)
     std_errs = np.concatenate(combined_errors, axis=0)
 
-    logging.info('Building cross-population covariances...')
-    # First get out plausible maximum and minimum true effect sizes
-    if args.scaled:
-        maxes = np.nanmax((betas/std_errs)**2, axis=1)
-        mins = np.zeros_like(maxes)
-        for population in range(len(mins)):
-            this_keep = betas[population, :]**2 > 0
-            mins[population] = np.nanpercentile(
-               (betas[population, this_keep]
-                / std_errs[population, this_keep])**2,
-               2.5
-            )
+    if args.load_checkpoint:
+        with open(args.load_checkpoint[1], 'rb') as pfile:
+            cross_pop_covs = pickle.load(pfile)[0]
     else:
-        maxes = np.zeros(betas.shape[0])
-        mins = np.zeros_like(maxes)
-        for population in range(len(mins)):
-            keep = ~np.isnan(betas[population])
-            this_beta = np.abs(betas[population, keep])
-            this_se = std_errs[population, keep]
-            psi = 1. / len(this_beta)
-            probs = 1. / (1.
-                          + ((1.-psi)/psi
-                             * np.sqrt(this_beta**2/this_se**2)
-                             * np.exp(-0.5*this_beta**2/this_se**2 + 0.5)))
-            ebayes = np.maximum(this_beta**2 - this_se**2, 1e-10)
-            raw_means = this_beta / (1. + this_se**2/ebayes**2)
-            maxes[population] = np.max(probs*raw_means)**2
-            mins[population] = np.nanpercentile(
-                betas[population, betas[population, :]**2 > 0]**2,
-                2.5
-            )
+        logging.info('Building cross-population covariances...')
+        # First get out plausible maximum and minimum true effect sizes
+        if args.scaled:
+            maxes = np.nanmax((betas/std_errs)**2, axis=1)
+            mins = np.zeros_like(maxes)
+            for population in range(len(mins)):
+                this_keep = betas[population, :]**2 > 0
+                mins[population] = np.nanpercentile(
+                   (betas[population, this_keep]
+                    / std_errs[population, this_keep])**2,
+                   2.5
+                )
+        else:
+            maxes = np.zeros(betas.shape[0])
+            mins = np.zeros_like(maxes)
+            for population in range(len(mins)):
+                keep = ~np.isnan(betas[population])
+                this_beta = np.abs(betas[population, keep])
+                this_se = std_errs[population, keep]
+                psi = 1. / len(this_beta)
+                probs = 1. / (1.
+                              + ((1.-psi)/psi
+                                 * np.sqrt(this_beta**2/this_se**2)
+                                 * np.exp(-0.5*this_beta**2/this_se**2 + 0.5)))
+                ebayes = np.maximum(this_beta**2 - this_se**2, 1e-10)
+                raw_means = this_beta / (1. + this_se**2/ebayes**2)
+                maxes[population] = np.max(probs*raw_means)**2
+                mins[population] = np.nanpercentile(
+                    betas[population, betas[population, :]**2 > 0]**2,
+                    2.5
+                )
 
-    # build covariance matrices
-    cross_pop_covs = _make_simple(num_pops, num_components, mins, maxes)
+        # build covariance matrices
+        cross_pop_covs = _make_simple(num_pops, num_components, mins, maxes)
 
-    # save covariance matrices
-    with open("%s.covariance.pkl" % args.output, "wb") as ofile:
-        pickle.dump([cross_pop_covs], ofile)
+        # save covariance matrices
+        with open('%s.covariance.pkl' % args.output, 'wb') as ofile:
+            pickle.dump([cross_pop_covs], ofile)
 
     # run optimization
     logging.info('Fitting...')
@@ -231,7 +242,11 @@ def main(args):
             init_hg=init_hg,
             num_its=args.num_its,
         )
-    params = elbo.optimize()
+
+    checkpoint = None
+    if args.load_checkpoint:
+        checkpoint = np.load(args.load_checkpoint[0])
+    params = elbo.optimize(checkpoint)
 
     # save model parameters
     to_save = elbo.create_dump_dict(params)
