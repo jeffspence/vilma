@@ -38,7 +38,7 @@ virtualenv my-vilma-env
 source my-pyrho-env/bin/activate
 ```
 
-Note that activating the virttual environment will
+Note that activating the virtual environment will
 be required before running `vilma` (e.g., if you open
 a new terminal, or deactivate `my-vilma-env`).
 
@@ -112,7 +112,7 @@ SVDs changed.  This results in LD matrices using up about half as much
 memory on disk, but unfortunately requires that LD matrices built using
 version 0.0.1 will need to be recomputed if the `--ldthresh` option was used.
 
-The LD matrix for each cohort is (in principle) a `num_snps` x `num_smnps` matrix
+The LD matrix for each cohort is (in principle) a `num_snps` x `num_snps` matrix
 where entry `i, j` is the correlation between genotypes at SNP `i` and SNP `j`.
 In practice, `vilma` will be run on millions of SNPs and performing computations
 with such a large matrix is prohibitive. As such, we build a sparse block-diagonal
