@@ -585,7 +585,7 @@ def test_load_sumstats():
 def test_load_ld_from_schema():
     variants = load.load_variant_list(correct_path('good_variants.tsv'))
     denylist = []
-    ldmat = load.load_ld_from_schema(
+    ldmat, missing = load.load_ld_from_schema(
         correct_path('ld_manifest.tsv'), variants, denylist, 1., False
     )
     true_ldmat = np.eye(13)
@@ -596,7 +596,7 @@ def test_load_ld_from_schema():
     v = np.random.random(13)
     assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))
 
-    ldmat = load.load_ld_from_schema(
+    ldmat, missing = load.load_ld_from_schema(
         correct_path('ld_manifest.tsv'), variants, denylist, 1., True
     )
     true_ldmat = np.eye(13)
@@ -608,7 +608,7 @@ def test_load_ld_from_schema():
     assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))
 
     denylist = [3, 4, 5]
-    ldmat = load.load_ld_from_schema(
+    ldmat, missing = load.load_ld_from_schema(
         correct_path('ld_manifest.tsv'), variants, denylist, 1., False
     )
     true_ldmat = np.eye(13)
@@ -625,7 +625,7 @@ def test_load_ld_from_schema():
 def test_load_ld_from_schema_svd():
     variants = load.load_variant_list(correct_path('good_variants.tsv'))
     denylist = []
-    ldmat = load.load_ld_from_schema(
+    ldmat, missing = load.load_ld_from_schema(
         correct_path('ld_manifest_svd.tsv'), variants, denylist, 1., False
     )
     true_ldmat = np.eye(13)
@@ -636,7 +636,7 @@ def test_load_ld_from_schema_svd():
     v = np.random.random(13)
     assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))
 
-    ldmat = load.load_ld_from_schema(
+    ldmat, missing = load.load_ld_from_schema(
         correct_path('ld_manifest_svd.tsv'), variants, denylist, 1., True
     )
     true_ldmat = np.eye(13)
@@ -648,7 +648,7 @@ def test_load_ld_from_schema_svd():
     assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))
 
     denylist = [3, 4, 5]
-    ldmat = load.load_ld_from_schema(
+    ldmat, missing = load.load_ld_from_schema(
         correct_path('ld_manifest_svd.tsv'), variants, denylist, 1., False
     )
     true_ldmat = np.eye(13)

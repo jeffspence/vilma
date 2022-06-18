@@ -139,6 +139,8 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
         A vilma.matrix_structures.BlockDiagonalMatrix containing the LD matrix
         ordered in the order of `variants`.
 
+        A list of positions that are missing LD info
+
     """
 
     svds = []
@@ -248,6 +250,7 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
     else:
         perm = np.array([], dtype=float)
     missing = set(np.arange(variants.shape[0]).tolist()) - set(perm.tolist())
+    list_of_missing = list(missing)
     missing = np.array(list(missing), dtype=int)
     logging.info('Loaded a total of %d variants.', variants.shape[0])
     logging.info('Missing LD info for %d variants. They will be ignored '
@@ -261,4 +264,4 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
     perm = np.array(perm)
     block_mat = BlockDiagonalMatrix(svds, perm=perm, missing=missing)
 
-    return block_mat
+    return block_mat, list_of_missing
