@@ -38,9 +38,18 @@ def main():
     for cmd in COMMANDS:
         cmd_parser = COMMANDS[cmd]['parser'](subparsers)
         cmd_parser.add_argument(
-            '--logfile', required=False, type=str, default='',
+            '--logfile',
+            required=False,
+            type=str,
+            default='',
             help='File to store information about the vilma run. To print to '
                  'stdout use "-". Defaults to no logging.'
+        )
+        cmd_parser.add_argumet(
+            '--verbose',
+            dest='verbose',
+            action='store_true',
+            help='Log all information (as opposed to just warnings)'
         )
     args = parser.parse_args()
     try:
@@ -48,10 +57,11 @@ def main():
     except KeyError:
         parser.print_help()
         exit()
+    level = 10 if args.verbose else 30
     if args.logfile == '-':
-        logging.basicConfig(level=0)
+        logging.basicConfig(level=level)
     elif args.logfile:
-        logging.basicConfig(filename=args.logfile, level=0)
+        logging.basicConfig(filename=args.logfile, level=level)
     func(args)
 
 

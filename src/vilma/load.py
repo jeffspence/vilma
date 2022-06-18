@@ -55,9 +55,9 @@ def load_annotations(annotations_filename, variants):
 
     dframe = pd.merge(variants, dframe, on='ID', how='left')
     dframe = pd.DataFrame(dframe['ANNOTATION'])
-    logging.info('%d out of %d total variants are missing annotations',
-                 dframe['ANNOTATION'].isna().sum(),
-                 dframe.shape[0])
+    logging.warning('%d out of %d total variants are missing annotations',
+                    dframe['ANNOTATION'].isna().sum(),
+                    dframe.shape[0])
 
     denylist = np.where(dframe['ANNOTATION'].isna())[0].tolist()
     dframe.loc[dframe['ANNOTATION'].isna(), 'ANNOTATION'] = 0
@@ -108,11 +108,11 @@ def load_sumstats(sumstats_filename, variants):
     missing = (sumstats.BETA.isna()
                | sumstats.SE.isna()
                | ((~stay_allele) & (~flip_allele)))
-    logging.info('%d out of %d total variants are missing sumstats',
-                 missing.sum(),
-                 sumstats.shape[0])
-    logging.info('%d alleles have been flipped',
-                 (flip_allele).sum())
+    logging.warning('%d out of %d total variants are missing sumstats',
+                    missing.sum(),
+                    sumstats.shape[0])
+    logging.warning('%d alleles have been flipped',
+                    (flip_allele).sum())
     sumstats.loc[missing, 'BETA'] = 0.
     sumstats.loc[missing, 'SE'] = 1.
     sumstats.loc[flip_allele, 'BETA'] = -sumstats.loc[flip_allele, 'BETA']
@@ -253,14 +253,16 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
     list_of_missing = list(missing)
     missing = np.array(list(missing), dtype=int)
     logging.info('Loaded a total of %d variants.', variants.shape[0])
-    logging.info('Missing LD info for %d variants. They will be ignored '
-                 'during optimization.', len(missing))
-    logging.info('The alleles did not match for %d variants. They were '
-                 'flipped', total_flipped)
+    logging.warning('Missing LD info for %d variants. They will be ignored '
+                    'during optimization.', len(missing))
+    logging.warning('The alleles did not match for %d variants. They were '
+                    'flipped', total_flipped)
     perm = np.concatenate([perm, missing])
     if not np.all(perm == np.arange(len(perm))):
-        logging.info('The variants in the extract file and the variants in '
-                     'the LD matrix were not in the same order.')
+        logging.warning('The variants in the extract file and the variants in '
+                        'the LD matrix were not in the same order.  The '
+                        'variants in the LD matrix have been reordered to '
+                        'match the extract file.')
     perm = np.array(perm)
     block_mat = BlockDiagonalMatrix(svds, perm=perm, missing=missing)
 

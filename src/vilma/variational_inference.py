@@ -346,9 +346,9 @@ class VIScheme():
             try:
                 self.error_scaling = loaded_checkpoint['error_scaling']
             except KeyError:
-                logging.info('Did not find "error_scaling" in the loaded '
-                             'checkpoint. That is okay, but we will have to '
-                             'assume that the error scalings are 1.')
+                logging.warning('Did not find "error_scaling" in the loaded '
+                                'checkpoint. That is okay, but we will have '
+                                'to assume that the error scalings are 1.')
             self._set_state(params)
         converged = False
         elbo = self.elbo(params)
