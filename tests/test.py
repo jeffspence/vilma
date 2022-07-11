@@ -662,6 +662,41 @@ def test_load_ld_from_schema_svd():
     assert np.allclose(ldmat.dot(v), true_ldmat.dot(v))
 
 
+def test_load_missing():
+    # good_sumstats_beta_plus_missing.tsv
+    # good_variants_plus_missing.tsv
+    variants = load.load_variant_list(
+        correct_path('good_variants_plus_missing.tsv')
+    )
+    denylist = []
+    ldmat, missing = load.load_ld_from_schema(
+        correct_path('ld_manifest.tsv'), variants, denylist, 1., False
+    )
+    assert 5 in missing
+    assert 12 in missing
+    assert 13 in missing
+    assert 14 in missing
+    assert len(missing) == 4
+    e13 = np.zeros(15)
+    e13[13] = 1
+    assert np.allclose(ldmat.dot(e13), 0)
+    assert np.allclose(ldmat.inverse.dot(e13), 0)
+    e14 = np.zeros(15)
+    e14[14] = 1
+    assert np.allclose(ldmat.dot(e14), 0)
+    assert np.allclose(ldmat.inverse.dot(e14), 0)
+
+    sumstats, missing = load.load_sumstats(
+        correct_path('good_sumstats_beta_plus_missing.tsv'),
+        variants
+    )
+    assert len(missing) == 4
+    assert 10 in missing
+    assert 11 in missing
+    assert 12 in missing
+    assert 14 in missing
+
+
 ###############################################################################
 ###############################################################################
 ###############################################################################
@@ -1674,7 +1709,7 @@ def test_MultiPopVI_update_beta():
     ((second_mu, second_delta, second_hyper),
      L, orig_obj, new_obj) = vischeme._update_beta(
          new_mu, new_delta, new_hyper, None, [1.], 0, 1.25
-     )
+    )
 
     assert np.isclose(new_obj, orig_obj)
     assert np.allclose(new_mu, second_mu)
