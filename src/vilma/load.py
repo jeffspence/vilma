@@ -136,13 +136,14 @@ def schema_iterator(schema_path):
     """
 
     with open(schema_path, 'r') as schema:
+        sep_char = '/' if '/' in schema_path else ''
         for line in schema:
             snp_path, ld_path = line.split()
             if snp_path[0] != '/':
                 snp_path = ('/'.join(schema_path.split('/')[:-1])
-                            + '/' + snp_path)
+                            + sep_char + snp_path)
                 ld_path = ('/'.join(schema_path.split('/')[:-1])
-                           + '/' + ld_path)
+                           + sep_char + ld_path)
             yield snp_path, ld_path
 
 
