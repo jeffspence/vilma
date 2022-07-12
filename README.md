@@ -214,6 +214,19 @@ their metadata in `<report_filename>`.  This can be useful to see what variants 
 schema, and to check to make sure that the SNP ID formatting in other files (e.g., the extract
 file and the sumstats files [below](#building-a-polygenic-score)) match the format in the schema.
 
+`--trace <report_filename>` computes the trace of a low rank approximation of the LD matrix specified
+ by the LD schema.
+This acts as a metric for seeing how good the low rank approximation is. If the trace is close
+to the number of (non-missing) SNPs, then, the matrix is nearly low rank and nothing is lost.
+In the case of large deviations, the low rank approximation will be a substantial "smoothing" of
+the true LD matrix. This may be desirable to "denoise" the LD matrix, but it may also over-regularize
+the matrix. Using the option `--trace-mmap` will store the LD matrices on disk while computing the
+trace to minimize the amount of RAM used.  The option `--trace-extract <variants_file>` will
+restrict the LD matrix to only those variants listed in `<variants_file>` (otherwise all variants
+in the schema -- i.e., those reported by `--listvars` will be used).  The option
+`--trace-annotations <annotations_file>` will cause traces to be computed for the whole matrix
+_and_ for each submatrix formed by restricting the matrix to each set of variants with the same
+annotation.
 
 ### Building a Polygenic Score
 
