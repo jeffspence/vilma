@@ -40,7 +40,7 @@ def load_variant_list(variant_filename):
 
 def load_annotations(annotations_filename, variants):
     """Read `annotations_filename`  and match annotations to `variants`"""
-    if annotations_filename is None:
+    if not annotations_filename:
         return np.ones((variants.shape[0], 1)), []
 
     dframe = pd.read_csv(annotations_filename,
