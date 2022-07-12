@@ -2,11 +2,14 @@ import os
 import plinkio.plinkfile
 from pytest import raises
 import numpy as np
+import pandas as pd
+import pickle
 from vilma import matrix_structures as mat_structs
 from vilma import load
 from vilma import make_ld_schema
 from vilma import numerics
 from vilma import variational_inference
+import subprocess
 
 
 # everything should be relative to this files directory
@@ -759,8 +762,8 @@ def test_make_ld_schema():
         assert mat.shape[0] == 2
         assert mat.shape[1] == 2
         with open(correct_path(varfile), 'r') as vfh:
-            assert vfh.readline() == '.\t1\t3\t0.0\tG\tT\n'
-            assert vfh.readline() == '.\t1\t4\t0.0\tG\tA\n'
+            assert vfh.readline() == 'var1\t1\t3\t0.0\tG\tT\n'
+            assert vfh.readline() == 'var2\t1\t4\t0.0\tG\tA\n'
             assert not vfh.readline()
 
         varfile, matfile = fh.readline().split()
@@ -770,7 +773,7 @@ def test_make_ld_schema():
         assert np.allclose(mat, 1)
         assert len(mat) == 1
         with open(correct_path(varfile), 'r') as vfh:
-            assert vfh.readline() == '.\t1\t9\t0.0\tC\tT\n'
+            assert vfh.readline() == 'var3\t1\t9\t0.0\tC\tT\n'
             assert not vfh.readline()
 
         varfile, matfile = fh.readline().split()
@@ -784,8 +787,8 @@ def test_make_ld_schema():
         assert np.isclose(mat[0, 1], -0.28867513)
         assert np.isclose(mat[1, 0], -0.28867513)
         with open(correct_path(varfile), 'r') as vfh:
-            assert vfh.readline() == '.\t1\t962\t0.0\tT\tG\n'
-            assert vfh.readline() == '.\t1\t975\t0.0\tT\tC\n'
+            assert vfh.readline() == 'var4\t1\t962\t0.0\tT\tG\n'
+            assert vfh.readline() == 'var5\t1\t975\t0.0\tT\tC\n'
             assert not vfh.readline()
         assert not fh.readline()
 
@@ -817,8 +820,8 @@ def test_make_ld_schema_svd():
         v = np.copy(u.T)
         assert np.allclose(u @ np.diag(s) @ v, 1)
         with open(correct_path(varfile), 'r') as vfh:
-            assert vfh.readline() == '.\t1\t3\t0.0\tG\tT\n'
-            assert vfh.readline() == '.\t1\t4\t0.0\tG\tA\n'
+            assert vfh.readline() == 'var1\t1\t3\t0.0\tG\tT\n'
+            assert vfh.readline() == 'var2\t1\t4\t0.0\tG\tA\n'
             assert not vfh.readline()
 
         varfile, matfile = fh.readline().split()
@@ -832,7 +835,7 @@ def test_make_ld_schema_svd():
         assert mat.shape[0] == 2
         assert mat.shape[1] == 1
         with open(correct_path(varfile), 'r') as vfh:
-            assert vfh.readline() == '.\t1\t9\t0.0\tC\tT\n'
+            assert vfh.readline() == 'var3\t1\t9\t0.0\tC\tT\n'
             assert not vfh.readline()
 
         varfile, matfile = fh.readline().split()
@@ -854,8 +857,8 @@ def test_make_ld_schema_svd():
         assert np.isclose(mat[0, 1], -0.28867513)
         assert np.isclose(mat[1, 0], -0.28867513)
         with open(correct_path(varfile), 'r') as vfh:
-            assert vfh.readline() == '.\t1\t962\t0.0\tT\tG\n'
-            assert vfh.readline() == '.\t1\t975\t0.0\tT\tC\n'
+            assert vfh.readline() == 'var4\t1\t962\t0.0\tT\tG\n'
+            assert vfh.readline() == 'var5\t1\t975\t0.0\tT\tC\n'
             assert not vfh.readline()
         assert not fh.readline()
 
@@ -1865,3 +1868,112 @@ def test_MultiPopVI_nat_to_not_vi_delta():
     )
     assert np.allclose(mu, new_mu)
     assert np.allclose(hyper, new_hyper)
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+# test CLI
+
+def test_cli_make_ld_schema():
+    if os.path.isfile(correct_path('test_ld_mats_cli.schema')):
+        os.remove(correct_path('test_ld_mats_cli.schema'))
+    exit_code = subprocess.call([
+        'vilma',
+        'make_ld_schema',
+        '--out-root', correct_path('test_ld_mats_cli'),
+        '--block-file', correct_path('blocks.bed'),
+        '--plink-file-list', correct_path('sim_genotypes_list.txt'),
+        '--ldthresh', '1.0'
+    ])
+    assert exit_code == 0
+    variants = load.load_variant_list(
+        correct_path('sim_genotypes_variants.tsv')
+    )
+    truth, missing = load.load_ld_from_schema(
+        correct_path('test_ld_mats.schema'),
+        variants,
+        denylist=[],
+        ldthresh=1.0
+    )
+    cli, missing = load.load_ld_from_schema(
+        correct_path('test_ld_mats_cli.schema'),
+        variants,
+        denylist=[],
+        ldthresh=1.0
+    )
+    x = np.random.random(truth.shape[0])
+    assert np.allclose(truth.dot(x), cli.dot(x))
+
+    if os.path.isfile(correct_path('test_ld_mats_cli_missing.schema')):
+        os.remove(correct_path('test_ld_mats_cli_missing.schema'))
+
+    exit_code = subprocess.call([
+        'vilma',
+        'make_ld_schema',
+        '--verbose',
+        '--extract', correct_path('sim_genotypes_variants_missing.tsv'),
+        '--out-root', correct_path('test_ld_mats_cli_missing'),
+        '--block-file', correct_path('blocks.bed'),
+        '--plink-file-list', correct_path('sim_genotypes_list.txt'),
+        '--ldthresh', '1.0'
+    ])
+
+    assert exit_code == 0
+
+    variants = load.load_variant_list(
+        correct_path('sim_genotypes_variants_missing.tsv')
+    )
+    cli, missing = load.load_ld_from_schema(
+        correct_path('test_ld_mats_cli_missing.schema'),
+        variants,
+        denylist=[],
+        ldthresh=1.0
+    )
+    assert cli.shape == (3, 3)
+    x = np.random.random(3)
+    assert np.allclose(cli.dot(x), x)
+
+
+def test_cli_fit():
+    exit_code = subprocess.call([
+        'vilma',
+        'fit',
+        '--ld-schema', correct_path('ld_manifest.tsv'),
+        '--sumstats', correct_path('good_sumstats_beta.tsv'),
+        '--output', correct_path('vilma_run'),
+        '-K', '80',
+        '--ldthresh', '0.8',
+        '--init-hg', '0.2',
+        '--samplesizes', '10e3',
+        '--names', 'test_cohort',
+        '--learn-scaling',
+        '--extract', correct_path('good_variants.tsv')
+    ])
+
+    assert exit_code == 0
+
+    truth = np.load(correct_path('copy_vilma_run.npz'))
+    cli = np.load(correct_path('vilma_run.npz'))
+    for fname in truth.files:
+        assert np.allclose(truth[fname], cli[fname])
+
+    with open(correct_path('copy_vilma_run.covariance.pkl'), 'rb') as fh:
+        truth = pickle.load(fh)
+    with open(correct_path('vilma_run.covariance.pkl'), 'rb') as fh:
+        cli = pickle.load(fh)
+
+    assert np.allclose(truth, cli)
+
+    truth = pd.read_csv(correct_path('copy_vilma_run.estimates.tsv'),
+                        sep='\t',
+                        header=0)
+    cli = pd.read_csv(correct_path('vilma_run.estimates.tsv'),
+                      sep='\t',
+                      header=0)
+
+    for c in truth.columns:
+        if type(truth[c].iloc[0]) == float:
+            assert np.allclose(truth[c], cli[c])
+        else:
+            assert np.all(truth[c] == cli[c])

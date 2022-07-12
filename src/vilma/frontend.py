@@ -45,7 +45,7 @@ def main():
             help='File to store information about the vilma run. To print to '
                  'stdout use "-". Defaults to no logging.'
         )
-        cmd_parser.add_argumet(
+        cmd_parser.add_argument(
             '--verbose',
             dest='verbose',
             action='store_true',
