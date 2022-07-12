@@ -1935,6 +1935,45 @@ def test_cli_make_ld_schema():
     assert np.allclose(cli.dot(x), x)
 
 
+def test_cli_check_ld_schema_listvars():
+    exit_code = subprocess.call([
+        'vilma',
+        'check_ld_schema',
+        '--ld-schema', correct_path('ld_manifest.tsv'),
+        '--listvars', correct_path('test_listvars.tsv')
+    ])
+
+    assert exit_code == 0
+
+    truth = pd.read_csv(correct_path('ld_variants.tsv'),
+                        header=None,
+                        names=['ID', 'CHROM', 'BP', 'CM', 'A1', 'A2'],
+                        delim_whitespace=True)
+    cli = pd.read_csv(correct_path('test_listvars.tsv'),
+                      header=0,
+                      delim_whitespace=True)
+    for c in truth.columns:
+        assert np.all(truth[c] == cli[c])
+
+    exit_code = subprocess.call([
+        'vilma',
+        'check_ld_schema',
+        '--ld-schema', correct_path('test_ld_mats.schema'),
+        '--listvars', correct_path('listvars_check_test_ld_mats.tsv')
+    ])
+
+    assert exit_code == 0
+
+    truth = pd.read_csv(correct_path('listvars_true_test_ld_mats.tsv'),
+                        header=0,
+                        delim_whitespace=True)
+    cli = pd.read_csv(correct_path('listvars_check_test_ld_mats.tsv'),
+                      header=0,
+                      delim_whitespace=True)
+    for c in truth.columns:
+        assert np.all(truth[c] == cli[c])
+
+
 def test_cli_fit():
     exit_code = subprocess.call([
         'vilma',

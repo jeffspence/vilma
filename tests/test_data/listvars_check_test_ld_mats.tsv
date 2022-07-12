@@ -1,0 +1,6 @@
+ID	CHROM	BP	CM	A1	A2
+var1	1	3	0.0	G	T
+var2	1	4	0.0	G	A
+var3	1	9	0.0	C	T
+var4	1	962	0.0	T	G
+var5	1	975	0.0	T	C

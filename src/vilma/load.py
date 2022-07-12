@@ -119,6 +119,34 @@ def load_sumstats(sumstats_filename, variants):
     return sumstats, np.where(missing)[0].tolist()
 
 
+def schema_iterator(schema_path):
+    """
+    Generator that iterates over the .var and .npy files in an LD schema
+
+    This takes care of splitting the lines in the LD schema, and also
+    handles whether the paths are absolute or relative to the LD schema.
+
+    args:
+        schema_path: path to file containing the schema manifest
+
+    yields:
+        A tuple where the first entry is the path (str) to a .var file
+        and the second is the path (str) to a .npy file, which together specify
+        an LD matrix on a set of variants.
+    """
+
+    with open(schema_path, 'r') as schema:
+        sep_char = '/' if '/' in schema_path else ''
+        for line in schema:
+            snp_path, ld_path = line.split()
+            if snp_path[0] != '/':
+                snp_path = ('/'.join(schema_path.split('/')[:-1])
+                            + sep_char + snp_path)
+                ld_path = ('/'.join(schema_path.split('/')[:-1])
+                           + sep_char + ld_path)
+            yield snp_path, ld_path
+
+
 def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
     """
     Load block matrix using specified schema, and filter to variants.
@@ -151,97 +179,88 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
     hdf_file = None
     if mmap:
         hdf_file = h5py.File(TemporaryFile(), 'w')
-    with open(schema_path, 'r') as schema:
-        for line in schema:
-            snp_path, ld_path = line.split()
-            # relative path:
-            if snp_path[0] != '/':
-                snp_path = ('/'.join(schema_path.split('/')[:-1])
-                            + '/' + snp_path)
-                ld_path = ('/'.join(schema_path.split('/')[:-1])
-                           + '/' + ld_path)
+    for snp_path, ld_path in schema_iterator(schema_path):
+        snp_metadata = pd.read_csv(snp_path,
+                                   header=None,
+                                   delim_whitespace=True,
+                                   names=['ID', 'CHROM', 'BP',
+                                          'CM', 'A1', 'A2'])
 
-            snp_metadata = pd.read_csv(snp_path,
-                                       header=None,
-                                       delim_whitespace=True,
-                                       names=['ID', 'CHROM', 'BP',
-                                              'CM', 'A1', 'A2'])
+        ld_shape = (snp_metadata.shape[0], snp_metadata.shape[0])
 
-            ld_shape = (snp_metadata.shape[0], snp_metadata.shape[0])
+        logging.info('LD matrix shape: %s', (ld_shape,))
 
-            logging.info('LD matrix shape: %s', (ld_shape,))
+        variant_indices = np.copy(
+            snp_metadata.ID.isin(variants.ID).to_numpy()
+        )
+        if np.sum(variant_indices) > 0:
+            kept_ids = snp_metadata.ID[variant_indices]
+            idx = var_reidx.loc[kept_ids].old_idx.to_numpy().flatten()
+            keep = np.isin(idx, denylist, invert=True)
+            to_change = np.where(variant_indices)[0][~keep]
+            variant_indices[to_change] = False
+            kept_ids = kept_ids.iloc[keep]
+            idx = idx[keep]
+            if len(idx) == 0:
+                continue
+            signs = np.ones(len(idx))
+            stay = [
+                (xa1 == ya1) and (xa2 == ya2)
+                for xa1, ya1, xa2, ya2 in
+                zip(variants['A1'].iloc[idx].to_numpy(),
+                    snp_metadata['A1'].iloc[variant_indices].to_numpy(),
+                    variants['A2'].iloc[idx].to_numpy(),
+                    snp_metadata['A2'].iloc[variant_indices].to_numpy())
+            ]
+            stay = np.array(stay)
+            flip = [
+                (xa1 == ya1) and (xa2 == ya2)
+                for xa1, ya2, xa2, ya1 in
+                zip(variants['A1'].iloc[idx].to_numpy(),
+                    snp_metadata['A1'].iloc[variant_indices].to_numpy(),
+                    variants['A2'].iloc[idx].to_numpy(),
+                    snp_metadata['A2'].iloc[variant_indices].to_numpy())
+            ]
+            flip = np.array(flip)
+            total_flipped += flip.sum()
+            mismatch = np.logical_and(~flip, ~stay)
+            if len(idx[~mismatch]) == 0:
+                continue
+            signs[flip] = -1
+            ld_matrix = np.copy(np.load(ld_path))
+            if len(ld_matrix.shape) == 0:
+                ld_matrix = ld_matrix[None, None]
+            if ld_matrix.shape[0] == ld_matrix.shape[1]:
+                logging.info('Proportion of variant indices '
+                             'being used: %e',
+                             np.mean(variant_indices))
 
-            variant_indices = np.copy(
-                snp_metadata.ID.isin(variants.ID).to_numpy()
-            )
-            if np.sum(variant_indices) > 0:
-                kept_ids = snp_metadata.ID[variant_indices]
-                idx = var_reidx.loc[kept_ids].old_idx.to_numpy().flatten()
-                keep = np.isin(idx, denylist, invert=True)
-                to_change = np.where(variant_indices)[0][~keep]
-                variant_indices[to_change] = False
-                kept_ids = kept_ids.iloc[keep]
-                idx = idx[keep]
-                if len(idx) == 0:
-                    continue
-                signs = np.ones(len(idx))
-                stay = [
-                    (xa1 == ya1) and (xa2 == ya2)
-                    for xa1, ya1, xa2, ya2 in
-                    zip(variants['A1'].iloc[idx].to_numpy(),
-                        snp_metadata['A1'].iloc[variant_indices].to_numpy(),
-                        variants['A2'].iloc[idx].to_numpy(),
-                        snp_metadata['A2'].iloc[variant_indices].to_numpy())
-                ]
-                stay = np.array(stay)
-                flip = [
-                    (xa1 == ya1) and (xa2 == ya2)
-                    for xa1, ya2, xa2, ya1 in
-                    zip(variants['A1'].iloc[idx].to_numpy(),
-                        snp_metadata['A1'].iloc[variant_indices].to_numpy(),
-                        variants['A2'].iloc[idx].to_numpy(),
-                        snp_metadata['A2'].iloc[variant_indices].to_numpy())
-                ]
-                flip = np.array(flip)
-                total_flipped += flip.sum()
-                mismatch = np.logical_and(~flip, ~stay)
-                if len(idx[~mismatch]) == 0:
-                    continue
-                signs[flip] = -1
-                ld_matrix = np.copy(np.load(ld_path))
-                if len(ld_matrix.shape) == 0:
-                    ld_matrix = ld_matrix[None, None]
-                if ld_matrix.shape[0] == ld_matrix.shape[1]:
-                    logging.info('Proportion of variant indices '
-                                 'being used: %e',
-                                 np.mean(variant_indices))
-
-                    accepted_matrix = np.copy(
-                        ld_matrix[np.ix_(variant_indices, variant_indices)]
-                    )
-                    accepted_matrix = accepted_matrix * np.outer(signs, signs)
-                    accepted_matrix = accepted_matrix[np.ix_(~mismatch,
-                                                             ~mismatch)]
-                else:
-                    if ld_matrix.shape[0] < ld_matrix.shape[1]:
-                        raise ValueError('Bad LD matrix.')
-                    num_snps = (ld_matrix.shape[0] - 1)
-                    if num_snps != variant_indices.shape[0]:
-                        raise ValueError('Bad LD matrix.')
-                    u_mat = np.copy(ld_matrix[0:num_snps])
-                    s_vec = np.copy(ld_matrix[num_snps])
-
-                    u_mat = u_mat[variant_indices, :]
-                    u_mat = signs.reshape((-1, 1)) * u_mat
-                    u_mat = np.copy(u_mat[~mismatch])
-                    accepted_matrix = (u_mat * s_vec).dot(u_mat.T)
-
-                perm.append(idx[~mismatch])
-                svds.append(
-                    LowRankMatrix(accepted_matrix,
-                                  ldthresh,
-                                  hdf_file=hdf_file)
+                accepted_matrix = np.copy(
+                    ld_matrix[np.ix_(variant_indices, variant_indices)]
                 )
+                accepted_matrix = accepted_matrix * np.outer(signs, signs)
+                accepted_matrix = accepted_matrix[np.ix_(~mismatch,
+                                                         ~mismatch)]
+            else:
+                if ld_matrix.shape[0] < ld_matrix.shape[1]:
+                    raise ValueError('Bad LD matrix.')
+                num_snps = (ld_matrix.shape[0] - 1)
+                if num_snps != variant_indices.shape[0]:
+                    raise ValueError('Bad LD matrix.')
+                u_mat = np.copy(ld_matrix[0:num_snps])
+                s_vec = np.copy(ld_matrix[num_snps])
+
+                u_mat = u_mat[variant_indices, :]
+                u_mat = signs.reshape((-1, 1)) * u_mat
+                u_mat = np.copy(u_mat[~mismatch])
+                accepted_matrix = (u_mat * s_vec).dot(u_mat.T)
+
+            perm.append(idx[~mismatch])
+            svds.append(
+                LowRankMatrix(accepted_matrix,
+                              ldthresh,
+                              hdf_file=hdf_file)
+            )
 
     # Need to add in variants that are not in the LD matrix
     # Set them to have massive variance

@@ -7,6 +7,7 @@ polygenic scores using variational inference on GWAS summary statistics from mul
 * [Installation](#installation)
 * [Usage](#usage)
     * [Building an LD Matrix](#building-an-ld-matrix)
+    * [Checking an LD Matrix](#checking-an-ld-matrix)
     * [Building a Polygenic Score](#building-a-polygenic-score)
 * [LD Matrices](#ld-matrices)
 * [Output File Formats](#output-file-formats)
@@ -202,6 +203,18 @@ For a detailed descriptions of all options, run
 vilma make_ld_schema --help
 ```
 
+### Checking an LD Matrix
+
+The module `vilma check_ld_schema` contains utilities to inspect and analyze an LD schema.
+In general one uses `--ld-schema <manifest_file>` to specify the LD schema, and then additional
+options are used with filenames to print the output of various analyses.
+
+`--listvars <report_filename>` collects all of the variants in the LD schema and stores
+their metadata in `<report_filename>`.  This can be useful to see what variants are in a
+schema, and to check to make sure that the SNP ID formatting in other files (e.g., the extract
+file and the sumstats files [below](#building-a-polygenic-score)) match the format in the schema.
+
+
 ### Building a Polygenic Score
 
 Once we have an LD Matrix as computed
@@ -343,6 +356,10 @@ the UK Biobank.
 
 The SNP IDs in these matrices are in the format "chr:pos_ref_alt", for example,
 10:100479326_G_A .
+
+You can check which variants are present in these matrices 
+using `vilma check_ld_schema` as described
+[above](#checking-an-ld-matrix).
 
 The LD matrices are available from google drive, and can be downloaded using gdown (example below):
 
