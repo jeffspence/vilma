@@ -407,11 +407,14 @@ Output File Formats
 `<out_base>.estimates.tsv` contains the posterior mean effect sizes estimates for each cohort.
 This is what should be passed to PLINK for scoring individuals (i.e., computing individuals'
 polygenic scores).  This file is tab-delimited and will contain 3 columns plus
-one column per cohort. The column `ID` contains the SNP IDs.  The column `A1` contains the
+four columns per cohort. The column `ID` contains the SNP IDs.  The column `A1` contains the
 allele which corresponds to the effect (i.e., the effect is the effect of each additional
 copy of allele `A1`) and `A2` contains the other allele.  The columns `posterior_<cohort_name>`
 contain the posterior mean estimate of the effect of each copy of the `A1` allele (in liability
-for dichotomous traits).
+for dichotomous traits).  The columns `posterior_variance_<cohort_name>` contain the posterior variance
+of each effect sizes in each cohort. The columns `missing_sumstats_<cohort_name>` indicate whether
+each variant is missing summary statistics and `missing_LD_<cohort_name>` indicate whether each
+variant is missing LD statistics (False is good, as it indicates that these are _not_ missing).
 
 `<out_base>.covariance.pkl` is a `python` `pickle` file that contains the covariance matrices
 (called ∑ in the paper) that comprise the component distributions of the prior.
