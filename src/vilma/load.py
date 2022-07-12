@@ -148,9 +148,33 @@ def schema_iterator(schema_path):
 
 
 def load_ld_mat(ld_path, variant_indices=None, mismatch=None, signs=None):
-    # TODO: document this
+    """
+    Load an individual LD matrix from an LD schema
+
+    This takes care of the (undocumented) convention that square matrices are
+    actual, faithful representations of an LD matrix, while a rectangular
+    matrix is an eigendecomposition stacked as a
+    (num_snps + 1) x (num_components) matrix, where the first num_snps rows
+    correspond to the eigenvectors (the columns of this submatrix are the
+    eigenvectors) and the final row is the eigenvalues.
+
+    args:
+        ld_path: path to the .npy file containing the LD matrix
+        variant_indices: a numpy array of booleans of length num_snps that
+            indicates whether each SNP should be included or not
+        mismatch: a numpy array of booleans of length variant_indices.sum()
+            that indicates whether any of the included SNPs should be excluded.
+        signs: a numpy array of length num_snps that is +1 if the alleles in
+            the LD matrix match the desired polarization and are -1 otherwise.
+            This will cause correlations to be "flipped" so that all
+            correlations and computed between the correct alleles.
+    """
 
     ld_matrix = np.load(ld_path)
+
+    if not np.allclose(signs**2, 1):
+        raise ValueError('signs must be a vector consisting entirely of '
+                         '+1s and -1s.')
 
     num_snps = ld_matrix.shape[0]
     if ld_matrix.shape[0] > ld_matrix.shape[1]:
@@ -237,9 +261,7 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
 
         logging.info('LD matrix shape: %s', (ld_shape,))
 
-        variant_indices = np.copy(
-            snp_metadata.ID.isin(variants.ID).to_numpy()
-        )
+        variant_indices = snp_metadata.ID.isin(variants.ID).to_numpy()
         if np.sum(variant_indices) > 0:
             kept_ids = snp_metadata.ID[variant_indices]
             idx = var_reidx.loc[kept_ids].old_idx.to_numpy().flatten()
