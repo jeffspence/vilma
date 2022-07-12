@@ -28,7 +28,7 @@ def args(super_parser):
                         help='Comma separated list of values to multiply'
                              'summary stat stderrs by.')
     parser.add_argument('--annotations', type=str, default=None,
-                        help='Comma-separated paths to annotation file')
+                        help='Path to annotation file')
     parser.add_argument('--output', required=True, type=str,
                         help='Output path prefix')
     parser.add_argument('--names', type=str, required=False,
