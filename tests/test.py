@@ -1973,7 +1973,7 @@ def test_cli_fit():
                       header=0)
 
     for c in truth.columns:
-        if type(truth[c].iloc[0]) == float:
+        if type(truth[c].iloc[0]) == np.float64:
             assert np.allclose(truth[c], cli[c])
         else:
             assert np.all(truth[c] == cli[c])
