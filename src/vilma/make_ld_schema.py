@@ -163,8 +163,12 @@ def main(args):
         for idx, line in enumerate(plink_manifest):
             logging.info('Working on plink file %d', idx + 1)
             logging.info('...reading data')
+            fname = line.strip()
+            if fname[0] != '/':
+                fname = ('/'.join(args.plink_file_list.split('/')[:-1])
+                         + '/' + fname)
             plink_data = plinkio.plinkfile.open(
-                line.strip()
+                fname
             )
             logging.info('...assigning SNPs to blocks')
             blocked_data = _assign_to_blocks(ld_blocks, plink_data, variants)

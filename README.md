@@ -35,7 +35,7 @@ If using `virtualenv` run:
 
 ```
 virtualenv my-vilma-env
-source my-pyrho-env/bin/activate
+source my-vilma-env/bin/activate
 ```
 
 Note that activating the virtual environment will

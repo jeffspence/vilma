@@ -112,6 +112,12 @@ def main(args):
     annotations, denylist = load.load_annotations(args.annotations,
                                                   variants=variants)
 
+    missing_annot = np.zeros(len(annotations), dtype=bool)
+    missing_annot[denylist] = True
+
+    missing_sumstats = np.zeros((len(annotations), num_pops), dtype=bool)
+    missing_ld_info = np.zeros((len(annotations), num_pops), dtype=bool)
+
     combined_ld = []
     combined_betas = []
     combined_errors = []
@@ -159,6 +165,7 @@ def main(args):
             logging.info('Loading sumstats for population %d...', (idx+1))
             sumstats, missing = load.load_sumstats(sumstats_path,
                                                    variants=variants)
+            missing_sumstats[missing, idx] = True
             missing.extend(denylist)
             combined_betas.append(np.array(sumstats.BETA).reshape((1, -1)))
             logging.info('Largest beta is... %f',
@@ -167,12 +174,16 @@ def main(args):
                                    * stderr_mult[idx])
 
             logging.info('Loading LD for population %d...', (idx+1))
-            ld_mat = load.load_ld_from_schema(ld_schema_path,
-                                              variants=variants,
-                                              denylist=missing,
-                                              ldthresh=args.ldthresh,
-                                              mmap=args.mmap)
+            ld_mat, this_missing_ld = load.load_ld_from_schema(
+                ld_schema_path,
+                variants=variants,
+                denylist=missing,
+                ldthresh=args.ldthresh,
+                mmap=args.mmap
+            )
             combined_ld.append(ld_mat)
+
+            missing_ld_info[this_missing_ld, idx] = True
 
     logging.info('Largest beta is... %f', np.max(np.abs(combined_betas)))
 
@@ -259,6 +270,14 @@ def main(args):
 
     for name, pmv in zip(names, elbo.real_posterior_variance(*params)):
         variants['posterior_variance_' + name] = pmv
+
+    if args.annotations:
+        variants['missing_annotation'] = missing_annot
+
+    for idx, name in enumerate(names):
+        variants['missing_sumstats_' + name] = missing_sumstats[:, idx]
+        variants['missing_LD_' + name] = missing_ld_info[:, idx]
+
     variants.to_csv(args.output + '.estimates.tsv', sep='\t', index=False)
 
 
