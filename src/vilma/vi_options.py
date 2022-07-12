@@ -46,7 +46,7 @@ def args(super_parser):
                         help='Threhold for singular value approximation of '
                              'LD matrix. Setting --ldthresh x guarantees '
                              'that SNPs with an r^2 of x or larger will be '
-                             'linearly independent. So ldthresh of 0 will '
+                             'linearly independent. So ldthresh of 1 will '
                              'result in no singular value thresholding.',
                         type=float)
     parser.add_argument('--seed', type=int, default=42,
