@@ -32,7 +32,7 @@ def args(super_parser):
     parser.add_argument('--trace-ldthresh',
                         required=False,
                         type=float,
-                        default=-1.,
+                        default=1.,
                         help='Threshold for singular value approximation of '
                              'LD matrix. Setting --trace-ldthresh x '
                              'guarantees that SNPs with an r^2 of x or larger '
@@ -149,7 +149,7 @@ def main(args):
     if args.trace_annotations and not args.trace:
         raise ValueError('If --trace-annotations is provided then '
                          '--trace must also be provided.')
-    if args.trace_ldthresh != -1 and not args.trace:
+    if args.trace_ldthresh != 1 and not args.trace:
         raise ValueError('If --trace-ldthresh is provided then '
                          '--trace must also be provided.')
     if not args.trace and not args.listvars:
@@ -171,11 +171,11 @@ def main(args):
             args.trace_annotations, variants
         )
 
-        ld_mat = vilma.load.load_ld_from_schema(
+        ld_mat, missing = vilma.load.load_ld_from_schema(
             args.ld_schema,
             variants=variants,
             denylist=denylist,
-            ldthresh=args.ldthresh,
+            ldthresh=args.trace_ldthresh,
             mmap=args.mmap
         )
         trace_summary = compute_trace(

@@ -2025,6 +2025,52 @@ def test_cli_check_ld_schema_listvars():
         assert np.all(truth[c] == cli[c])
 
 
+def test_cli_check_ld_schema_trace():
+    exit_code = subprocess.call([
+        'vilma',
+        'check_ld_schema',
+        '--ld-schema', correct_path('ld_manifest.tsv'),
+        '--trace', correct_path('trace_check_test_ld_mats.tsv')
+    ])
+    assert exit_code == 0
+
+    truth = pd.read_csv(correct_path('trace_true_test_ld_mats.tsv'),
+                        header=0,
+                        delim_whitespace=True)
+    cli = pd.read_csv(correct_path('trace_check_test_ld_mats.tsv'),
+                      header=0,
+                      delim_whitespace=True)
+    for c in truth.columns:
+        if type(truth[c].iloc[0]) == float:
+            assert np.allclose(truth[c], cli[c])
+        else:
+            assert np.all(truth[c] == cli[c])
+
+    exit_code = subprocess.call([
+        'vilma',
+        'check_ld_schema',
+        '--ld-schema', correct_path('ld_manifest.tsv'),
+        '--trace', correct_path('trace_check_test2_ld_mats.tsv'),
+        '--trace-ldthresh', '0.5',
+        '--trace-annotations', correct_path('good_annotations.tsv'),
+        '--trace-extract', correct_path('good_sumstats_beta.tsv'),
+        '--trace-mmap'
+    ])
+    assert exit_code == 0
+
+    truth = pd.read_csv(correct_path('trace_true_test2_ld_mats.tsv'),
+                        header=0,
+                        delim_whitespace=True)
+    cli = pd.read_csv(correct_path('trace_check_test2_ld_mats.tsv'),
+                      header=0,
+                      delim_whitespace=True)
+    for c in truth.columns:
+        if type(truth[c].iloc[0]) == float:
+            assert np.allclose(truth[c], cli[c])
+        else:
+            assert np.all(truth[c] == cli[c])
+
+
 def test_cli_fit():
     exit_code = subprocess.call([
         'vilma',
