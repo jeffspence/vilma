@@ -93,13 +93,17 @@ def compute_trace(block_ld_mat, one_hot_annotations):
     total_snps = block_ld_mat.shape[0] - len(block_ld_mat.missing)
 
     trace_summary = pd.DataFrame(
-        {'annotation': 'all_snps',
-         'trace': total_trace,
-         'num_snps': total_snps,
-         'ratio': total_trace/total_snps}
+        {'annotation': ['all_snps'],
+         'trace': [total_trace],
+         'num_snps': [total_snps],
+         'ratio': [total_trace/total_snps]}
     )
 
-    if one_hot_annotations is not None:
+    if not np.all(one_hot_annotations.sum(axis=1) == 1):
+        raise ValueError('one_hot_annotations must be '
+                         'one-hot encoded.')
+
+    if one_hot_annotations.shape[1] > 1:
         not_missing = np.ones(ld_diags.shape[0])
         not_missing[block_ld_mat.missing] = 0.
         annotation_snps = not_missing.dot(one_hot_annotations)

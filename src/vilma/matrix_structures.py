@@ -299,7 +299,7 @@ class BlockDiagonalMatrix():
                 a 1 x 1 component matrix that is just 0.
         """
         if missing is None:
-            missing = np.array([])
+            missing = np.array([], dtype=np.int64)
         self.missing = np.copy(missing)
         for matrix in matrices:
             if not isinstance(matrix, LowRankMatrix):
