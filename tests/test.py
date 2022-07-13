@@ -9,6 +9,7 @@ from vilma import load
 from vilma import make_ld_schema
 from vilma import numerics
 from vilma import variational_inference
+from vilma import check_ld_schema
 import subprocess
 
 
@@ -1873,6 +1874,56 @@ def test_MultiPopVI_nat_to_not_vi_delta():
 ###############################################################################
 ###############################################################################
 ###############################################################################
+# test check_ld_schema
+def test_compute_trace():
+    x1 = np.random.random((5, 5))
+    x1 = x1 + x1.T + 3 * np.eye(5)
+    m1 = mat_structs.LowRankMatrix(X=x1, t=1.)
+    x2 = np.random.random((3, 3))
+    x2 = x2 + x2.T + 3 * np.eye(3)
+    m2 = mat_structs.LowRankMatrix(X=x2, t=1.)
+    full_x = np.zeros((8, 8))
+    full_x[0:5, 0:5] = x1
+    full_x[5:8, 5:8] = x2
+    m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
+    true_trace = np.diag(full_x).sum()
+    trace_df = check_ld_schema.compute_trace(m, np.ones((8, 1)))
+    assert np.all(trace_df['annotation'] == 'all_snps')
+    assert np.allclose(trace_df['trace'], true_trace)
+    assert np.allclose(trace_df['num_snps'], 8)
+    assert np.allclose(trace_df['ratio'], true_trace/8)
+
+    one_hot = np.zeros((8, 3))
+    one_hot[::4, 0] = 1
+    one_hot[1::4, 1] = 1
+    one_hot[2::4, 2] = 1
+    one_hot[3::4, 2] = 1
+    trace_df = check_ld_schema.compute_trace(m, one_hot)
+    true_trace = np.array(
+        [true_trace,
+         np.diag(full_x)[::4].sum(),
+         np.diag(full_x)[1::4].sum(),
+         np.diag(full_x)[2::4].sum() + np.diag(full_x)[3::4].sum()]
+    )
+    true_counts = np.array([8, 2, 2, 4])
+    true_label = np.array(['all_snps',
+                           'annotation_0',
+                           'annotation_1',
+                           'annotation_2'])
+    assert np.all(trace_df['annotation'] == true_label)
+    assert np.allclose(trace_df['trace'], true_trace)
+    assert np.allclose(trace_df['num_snps'], true_counts)
+    assert np.allclose(trace_df['ratio'], true_trace/true_counts)
+
+
+def test_combine_vars():
+    # covered by test_cli_check_ld_schema_listvars
+    pass
+
+
+###############################################################################
+###############################################################################
+###############################################################################
 # test CLI
 
 def test_cli_make_ld_schema():
@@ -1972,6 +2023,52 @@ def test_cli_check_ld_schema_listvars():
                       delim_whitespace=True)
     for c in truth.columns:
         assert np.all(truth[c] == cli[c])
+
+
+def test_cli_check_ld_schema_trace():
+    exit_code = subprocess.call([
+        'vilma',
+        'check_ld_schema',
+        '--ld-schema', correct_path('ld_manifest.tsv'),
+        '--trace', correct_path('trace_check_test_ld_mats.tsv')
+    ])
+    assert exit_code == 0
+
+    truth = pd.read_csv(correct_path('trace_true_test_ld_mats.tsv'),
+                        header=0,
+                        delim_whitespace=True)
+    cli = pd.read_csv(correct_path('trace_check_test_ld_mats.tsv'),
+                      header=0,
+                      delim_whitespace=True)
+    for c in truth.columns:
+        if type(truth[c].iloc[0]) == float:
+            assert np.allclose(truth[c], cli[c])
+        else:
+            assert np.all(truth[c] == cli[c])
+
+    exit_code = subprocess.call([
+        'vilma',
+        'check_ld_schema',
+        '--ld-schema', correct_path('ld_manifest.tsv'),
+        '--trace', correct_path('trace_check_test2_ld_mats.tsv'),
+        '--trace-ldthresh', '0.5',
+        '--trace-annotations', correct_path('good_annotations.tsv'),
+        '--trace-extract', correct_path('good_sumstats_beta.tsv'),
+        '--trace-mmap'
+    ])
+    assert exit_code == 0
+
+    truth = pd.read_csv(correct_path('trace_true_test2_ld_mats.tsv'),
+                        header=0,
+                        delim_whitespace=True)
+    cli = pd.read_csv(correct_path('trace_check_test2_ld_mats.tsv'),
+                      header=0,
+                      delim_whitespace=True)
+    for c in truth.columns:
+        if type(truth[c].iloc[0]) == float:
+            assert np.allclose(truth[c], cli[c])
+        else:
+            assert np.all(truth[c] == cli[c])
 
 
 def test_cli_fit():

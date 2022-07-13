@@ -40,7 +40,7 @@ def load_variant_list(variant_filename):
 
 def load_annotations(annotations_filename, variants):
     """Read `annotations_filename`  and match annotations to `variants`"""
-    if annotations_filename is None:
+    if not annotations_filename:
         return np.ones((variants.shape[0], 1)), []
 
     dframe = pd.read_csv(annotations_filename,
@@ -147,6 +147,77 @@ def schema_iterator(schema_path):
             yield snp_path, ld_path
 
 
+def load_ld_mat(ld_path, variant_indices=None, mismatch=None, signs=None):
+    """
+    Load an individual LD matrix from an LD schema
+
+    This takes care of the (undocumented) convention that square matrices are
+    actual, faithful representations of an LD matrix, while a rectangular
+    matrix is an eigendecomposition stacked as a
+    (num_snps + 1) x (num_components) matrix, where the first num_snps rows
+    correspond to the eigenvectors (the columns of this submatrix are the
+    eigenvectors) and the final row is the eigenvalues.
+
+    args:
+        ld_path: path to the .npy file containing the LD matrix
+        variant_indices: a numpy array of booleans of length num_snps that
+            indicates whether each SNP should be included or not
+        mismatch: a numpy array of booleans of length variant_indices.sum()
+            that indicates whether any of the included SNPs should be excluded.
+        signs: a numpy array of length num_snps that is +1 if the alleles in
+            the LD matrix match the desired polarization and are -1 otherwise.
+            This will cause correlations to be "flipped" so that all
+            correlations and computed between the correct alleles.
+    """
+
+    ld_matrix = np.load(ld_path)
+
+    if not np.allclose(signs**2, 1):
+        raise ValueError('signs must be a vector consisting entirely of '
+                         '+1s and -1s.')
+
+    num_snps = ld_matrix.shape[0]
+    if ld_matrix.shape[0] > ld_matrix.shape[1]:
+        num_snps -= 1
+
+    if variant_indices is None:
+        variant_indices = np.ones(num_snps, dtype=bool)
+    if mismatch is None:
+        mismatch = np.zeros(variant_indices.sum(), dtype=bool)
+    if signs is None:
+        signs = np.ones(num_snps)
+
+    if len(ld_matrix.shape) == 0:
+        return ld_matrix[None, None]
+
+    # square matrix implies that this is a real LD matrix
+    if ld_matrix.shape[0] == ld_matrix.shape[1]:
+        accepted_matrix = np.copy(
+            ld_matrix[np.ix_(variant_indices, variant_indices)]
+        )
+        accepted_matrix = accepted_matrix * np.outer(signs, signs)
+        accepted_matrix = accepted_matrix[np.ix_(~mismatch,
+                                                 ~mismatch)]
+        return accepted_matrix
+
+    # This format is impossible under curent specification
+    if ld_matrix.shape[0] < ld_matrix.shape[1]:
+        raise ValueError('Bad LD matrix.')
+
+    # Otherwise, this is an eigendecomposition stacked on itself
+    num_snps = (ld_matrix.shape[0] - 1)
+    if num_snps != variant_indices.shape[0]:
+        raise ValueError('Bad LD matrix.')
+    u_mat = np.copy(ld_matrix[0:num_snps])
+    s_vec = np.copy(ld_matrix[num_snps])
+
+    u_mat = u_mat[variant_indices, :]
+    u_mat = signs.reshape((-1, 1)) * u_mat
+    u_mat = np.copy(u_mat[~mismatch])
+    accepted_matrix = (u_mat * s_vec).dot(u_mat.T)
+    return accepted_matrix
+
+
 def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
     """
     Load block matrix using specified schema, and filter to variants.
@@ -190,15 +261,17 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
 
         logging.info('LD matrix shape: %s', (ld_shape,))
 
-        variant_indices = np.copy(
-            snp_metadata.ID.isin(variants.ID).to_numpy()
-        )
+        variant_indices = snp_metadata.ID.isin(variants.ID).to_numpy()
         if np.sum(variant_indices) > 0:
             kept_ids = snp_metadata.ID[variant_indices]
             idx = var_reidx.loc[kept_ids].old_idx.to_numpy().flatten()
             keep = np.isin(idx, denylist, invert=True)
             to_change = np.where(variant_indices)[0][~keep]
             variant_indices[to_change] = False
+            logging.info('Proportion of variant indices '
+                         'being used: %e',
+                         np.mean(variant_indices))
+
             kept_ids = kept_ids.iloc[keep]
             idx = idx[keep]
             if len(idx) == 0:
@@ -227,34 +300,11 @@ def load_ld_from_schema(schema_path, variants, denylist, ldthresh, mmap=False):
             if len(idx[~mismatch]) == 0:
                 continue
             signs[flip] = -1
-            ld_matrix = np.copy(np.load(ld_path))
-            if len(ld_matrix.shape) == 0:
-                ld_matrix = ld_matrix[None, None]
-            if ld_matrix.shape[0] == ld_matrix.shape[1]:
-                logging.info('Proportion of variant indices '
-                             'being used: %e',
-                             np.mean(variant_indices))
 
-                accepted_matrix = np.copy(
-                    ld_matrix[np.ix_(variant_indices, variant_indices)]
-                )
-                accepted_matrix = accepted_matrix * np.outer(signs, signs)
-                accepted_matrix = accepted_matrix[np.ix_(~mismatch,
-                                                         ~mismatch)]
-            else:
-                if ld_matrix.shape[0] < ld_matrix.shape[1]:
-                    raise ValueError('Bad LD matrix.')
-                num_snps = (ld_matrix.shape[0] - 1)
-                if num_snps != variant_indices.shape[0]:
-                    raise ValueError('Bad LD matrix.')
-                u_mat = np.copy(ld_matrix[0:num_snps])
-                s_vec = np.copy(ld_matrix[num_snps])
-
-                u_mat = u_mat[variant_indices, :]
-                u_mat = signs.reshape((-1, 1)) * u_mat
-                u_mat = np.copy(u_mat[~mismatch])
-                accepted_matrix = (u_mat * s_vec).dot(u_mat.T)
-
+            accepted_matrix = load_ld_mat(ld_path,
+                                          variant_indices,
+                                          mismatch,
+                                          signs)
             perm.append(idx[~mismatch])
             svds.append(
                 LowRankMatrix(accepted_matrix,

@@ -28,7 +28,7 @@ def args(super_parser):
                         help='Comma separated list of values to multiply'
                              'summary stat stderrs by.')
     parser.add_argument('--annotations', type=str, default=None,
-                        help='Comma-separated paths to annotation file')
+                        help='Path to annotation file')
     parser.add_argument('--output', required=True, type=str,
                         help='Output path prefix')
     parser.add_argument('--names', type=str, required=False,
@@ -46,7 +46,7 @@ def args(super_parser):
                         help='Threhold for singular value approximation of '
                              'LD matrix. Setting --ldthresh x guarantees '
                              'that SNPs with an r^2 of x or larger will be '
-                             'linearly independent. So ldthresh of 0 will '
+                             'linearly independent. So ldthresh of 1 will '
                              'result in no singular value thresholding.',
                         type=float)
     parser.add_argument('--seed', type=int, default=42,
