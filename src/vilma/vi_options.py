@@ -20,17 +20,17 @@ def args(super_parser):
     parser.add_argument('--num-its', default=1000, type=int,
                         help='Maximum number of optimization iterations.')
     parser.add_argument('--ld-schema', required=True, type=str,
-                        help='Comma-separate paths to LD panel schemas')
+                        help='Comma-separated paths to LD panel schemas.')
     parser.add_argument('--sumstats', required=True, type=str,
-                        help='Comma-separated paths to summary statistics')
+                        help='Comma-separated paths to summary statistics.')
     parser.add_argument('--stderrscale', default='1.0', type=str,
                         required=False,
                         help='Comma separated list of values to multiply'
                              'summary stat stderrs by.')
     parser.add_argument('--annotations', type=str, default=None,
-                        help='Path to annotation file')
+                        help='Path to annotation file.')
     parser.add_argument('--output', required=True, type=str,
-                        help='Output path prefix')
+                        help='Output path prefix.')
     parser.add_argument('--names', type=str, required=False,
                         help='Comma-separated names of the '
                              'populations for output. Defaults to '
@@ -160,8 +160,8 @@ def main(args):
 
     else:
         for idx, (ld_schema_path, sumstats_path) in enumerate(
-                zip(*(args.ld_schema.split(','),
-                    args.sumstats.split(',')))):
+                zip(args.ld_schema.split(','),
+                    args.sumstats.split(','))):
             logging.info('Loading sumstats for population %d...', (idx+1))
             sumstats, missing = load.load_sumstats(sumstats_path,
                                                    variants=variants)

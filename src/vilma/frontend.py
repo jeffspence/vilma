@@ -6,6 +6,8 @@ from vilma.make_ld_schema import main as make_ld_schema
 from vilma.make_ld_schema import args as make_ld_schema_args
 from vilma.check_ld_schema import main as check_ld_schema
 from vilma.check_ld_schema import args as check_ld_schema_args
+from vilma.sim import main as sim
+from vilma.sim import args as sim_args
 from vilma.vi_options import main as fit
 from vilma.vi_options import args as fit_args
 
@@ -13,6 +15,7 @@ COMMANDS = {
     'make_ld_schema': {'cmd': make_ld_schema, 'parser': make_ld_schema_args},
     'check_ld_schema': {'cmd': check_ld_schema,
                         'parser': check_ld_schema_args},
+    'sim': {'cmd': sim, 'parser': sim_args},
     'fit': {'cmd': fit, 'parser': fit_args},
 }
 
@@ -25,6 +28,7 @@ def main():
         make_ld_schema: Build a block diagonal LD matrix and store it in the
             format needed by vilma.
         check_ld_schema: Utilities for inspecting and analyzing LD schema.
+        sim: Simulate GWAS summary data from a mixture-of-gaussians model.
         fit: Fit a model to GWAS summary statistics and use that model to build
             polygenic scores.
 
