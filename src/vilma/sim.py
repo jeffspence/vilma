@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import vilma
 import pickle
-import scipy.linalg
 
 
 def args(super_parser):
@@ -125,7 +124,7 @@ def sim_true_effects(annotations, weights, cov_mats):
     # X = LL^T, then if v ~ N(0, I) we have
     # Lv ~ N(0, LL^T) = N(0, X)
     sqrt_covs = np.array(
-        [scipy.linalg.cholesky(mat, lower=True) for mat in cov_mats]
+        [np.linalg.cholesky(mat) for mat in cov_mats]
     )
     true_effects = np.einsum('ip,ik,kqp->qi',
                              latent_effects,
