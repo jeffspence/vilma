@@ -9,6 +9,7 @@ polygenic scores using variational inference on GWAS summary statistics from mul
     * [Building an LD Matrix](#building-an-ld-matrix)
     * [Checking an LD Matrix](#checking-an-ld-matrix)
     * [Building a Polygenic Score](#building-a-polygenic-score)
+    * [Simulating Data](#simulating-data)
 * [LD Matrices](#ld-matrices)
 * [Output File Formats](#output-file-formats)
 * [Example](#example)
@@ -351,6 +352,43 @@ For a detailed description of these options (and additional options), run
 ```
 vilma fit --help
 ```
+
+### Simulating Data
+
+`vilma` also contains utilities to simulate GWAS data from Gaussian mixture models.
+These are implemented in `vilma sim`.  A typical command would be
+
+```
+vilma sim --sumstats <summstats_cohort_1>,<summstats_cohort_2>,... \
+    --covariance <covariance_matrices.pkl> \
+    --weights <weights.npz> \
+    --gwas-n-scaling <scale_for_cohort_1>,<scale_for_cohort_2>,... \
+    --annotations <annotations.tsv> \
+    --names <name_for_cohort_1>,<name_for_cohort_2>,... \
+    --ld-schema <path_to_ld_schema_for_cohort_1>,<path_to_ld_schema_for_cohort_2>,... \
+    --seed <seed> \
+    --output <output_filenames_root>
+```
+
+This uses the summary statistics files provided to get the standard error and variants
+to simulate. `<covariances_matrices.pkl>` is as described [below](#output-file-formats),
+and specifies the covariance matrices for each of the mixture components to simulate from.
+The weights file should either be a `.npz` file containing a file `'hyper_delta'` which
+is a `[num_annotations] x [num_mixture_components]` numpy array where each row is
+the distribution over mixture components for that annotation, or the weights file should
+be a `.npy` file with the same matrix. `--gwas-n-scaling` allows the user to simulate
+a GWAS with a different sample size than the one used to obtain the sumstats file. For
+example setting `--gwas-n-scaling 2,3` will double the sample size for the first cohort
+and will triple the sample size for the second cohort.  The annotations file is as above
+and indicates which annotation each SNP belongs to.  SNPs that do not have an annotation
+will be randomly assigned an annotation proportionally to the number of SNPs in each
+annotation.  The `--names` are only used to naming the output files.  The `--ld-schema` are
+as described above and should be the paths of the manifest files for the LD matrices for
+each cohort.  `--seed` should be used to indicate the seed to be used for the simulations.
+Note that by default, the seed is `42` so simulating multiple times without setting the
+seed will result in duplicated simulations. Finally, `--output` determines where the
+simulated GWAS summary statistics will be saved. Outputs will be saved as `.tsv` files
+at `<output_filenames_root>.<name_for_cohort>.simgwas.tsv`.
 
 LD Matrices
 ----------

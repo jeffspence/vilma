@@ -10,10 +10,11 @@ from vilma import make_ld_schema
 from vilma import numerics
 from vilma import variational_inference
 from vilma import check_ld_schema
+from vilma import sim
 import subprocess
 
 
-# everything should be relative to this files directory
+# everything should be relative to this file's directory
 def correct_path(fname):
     return os.path.join(os.path.dirname(__file__), 'test_data', fname)
 
@@ -161,25 +162,27 @@ def test_LowRankMatrix_diag():
     assert np.allclose(np.diag(x) + D, m.diag())
 
 
-def test_LowRankMatrix_pow():
+def test_LowRankMatrix_matrix_power():
     x = np.random.random((5, 5))
     x = x + x.T + 3 * np.eye(5)
     m = mat_structs.LowRankMatrix(X=x, t=1.)
 
     v = np.random.random(5)
 
-    assert np.allclose(x.dot(x).dot(v), (m**2).dot(v))
+    assert np.allclose(x.dot(x).dot(v),
+                       m.matrix_power(2).dot(v))
 
     x = np.eye(5)*2
     x[0, 0] = 0
     m = mat_structs.LowRankMatrix(X=x, t=0.5)
 
-    assert np.allclose(np.diag(x)**2, (m**2).diag())
+    assert np.allclose(np.diag(x)**2,
+                       m.matrix_power(2).diag())
 
     with raises(NotImplementedError):
         D = np.random.random(5)
         m = mat_structs.LowRankMatrix(u=m.u, s=m.s, v=m.v, D=D)
-        m**2
+        m.matrix_power(2)
 
 
 def test_LowRankMatrix_get_rank():
@@ -360,7 +363,7 @@ def test_BlockDiagonalMatrix_dot():
     assert np.allclose(m.dot(v_full)[8:], 0)
 
 
-def test_BlockDiagonalMatrix_pow():
+def test_BlockDiagonalMatrix_matrix_power():
     x1 = np.random.random((5, 5))
     x1 = x1 + x1.T + 3 * np.eye(5)
     m1 = mat_structs.LowRankMatrix(X=x1, t=1.)
@@ -373,7 +376,8 @@ def test_BlockDiagonalMatrix_pow():
     m = mat_structs.BlockDiagonalMatrix(matrices=[m1, m2])
 
     v = np.random.random(8)
-    assert np.allclose(full_x.dot(full_x.dot(v)), (m**2).dot(v))
+    assert np.allclose(full_x.dot(full_x.dot(v)),
+                       m.matrix_power(2).dot(v))
 
 
 def test_BlockDiagonalMatrix_inverse():
@@ -401,7 +405,7 @@ def test_BlockDiagonalMatrix_inverse():
 
     assert np.allclose(
         np.linalg.inv(full_x.dot(full_x)).dot(v),
-        (m.inverse ** 2).dot(v)
+        (m.inverse.matrix_power(2)).dot(v)
     )
 
     with raises(NotImplementedError):
@@ -1875,6 +1879,7 @@ def test_MultiPopVI_nat_to_not_vi_delta():
 ###############################################################################
 ###############################################################################
 # test check_ld_schema
+
 def test_compute_trace():
     x1 = np.random.random((5, 5))
     x1 = x1 + x1.T + 3 * np.eye(5)
@@ -1924,7 +1929,98 @@ def test_combine_vars():
 ###############################################################################
 ###############################################################################
 ###############################################################################
+# test check_ld_schema
+
+def test_sim_components():
+    annotations = np.zeros((20000, 2))
+    annotations[0:10000, 0] = 1
+    annotations[10000:, 1] = 1
+    weights = np.array([[0.5, 0.3, 0.2], [0.2, 0.3, 0.5]])
+    sims = sim.sim_components(annotations, weights)
+    assert sims.shape == (20000, 3)
+    assert np.allclose(sims.sum(axis=1), 1)
+
+    first_bunch = sims[0:10000, :].mean(axis=0)
+    second_bunch = sims[10000:, :].mean(axis=0)
+
+    assert np.all(np.abs(first_bunch - np.array([0.5, 0.3, 0.2]))
+                  < 0.025)
+
+    assert np.all(np.abs(second_bunch - np.array([0.2, 0.3, 0.5]))
+                  < 0.025)
+
+
+def test_sim_true_effects():
+    annotations = np.zeros((20000, 2))
+    annotations[0:10000, 0] = 1
+    annotations[10000:, 1] = 1
+    weights = np.array([[1.0, 0.], [0., 1.0]])
+    cov_mat_1 = np.random.random((3, 3))
+    cov_mat_1 = cov_mat_1 + cov_mat_1.T + 5*np.eye(3)
+    cov_mat_2 = 10 * np.random.random((3, 3))
+    cov_mat_2 = cov_mat_2 + cov_mat_2.T + 50*np.eye(3)
+    cov_mats = np.array([cov_mat_1, cov_mat_2])
+
+    true_effects = sim.sim_true_effects(annotations, weights, cov_mats)
+    assert true_effects.shape == (3, 20000)
+
+    first_means = true_effects[:, 0:10000].mean(axis=1)
+    assert np.all(np.abs(first_means / np.sqrt(np.diag(cov_mat_1)))
+                  < 5 / np.sqrt(10000))
+
+    second_means = true_effects[:, 10000:].mean(axis=1)
+    assert np.all(np.abs(second_means / np.sqrt(np.diag(cov_mat_2)))
+                  < 5 / np.sqrt(10000))
+
+    error_term_1 = np.sqrt(np.outer(np.diag(cov_mat_1), np.diag(cov_mat_1)))
+    first_cov = np.cov(true_effects[:, 0:10000])
+    assert np.all(np.abs(first_cov - cov_mat_1)
+                  < error_term_1*5/np.sqrt(10000))
+
+    error_term_2 = np.sqrt(np.outer(np.diag(cov_mat_2), np.diag(cov_mat_2)))
+    second_cov = np.cov(true_effects[:, 10000:])
+    assert np.all(np.abs(second_cov - cov_mat_2)
+                  < error_term_2*5/np.sqrt(10000))
+
+
+def test_sim_gwas():
+    beta_hats = np.zeros((3, 10000))
+
+    true_betas = np.random.random(3)
+    std_errs = np.random.random(3)
+    x = np.random.random((3, 3))
+    x = x + x.T + 5 * np.eye(3)
+    x_dense = np.copy(x)
+    x = mat_structs.LowRankMatrix(X=x)
+    x = mat_structs.BlockDiagonalMatrix(matrices=[x])
+    for i in range(10000):
+        beta_hats[:, i] = sim.sim_gwas(true_betas, std_errs, x)
+
+    true_beta_hat_mean = x_dense.dot(true_betas / std_errs) * std_errs
+    true_beta_hat_var = np.diag(std_errs).dot(x_dense.dot(np.diag(std_errs)))
+
+    assert np.all(np.abs(beta_hats.mean(axis=1) - true_beta_hat_mean)
+                  < np.sqrt(np.diag(true_beta_hat_var)) / np.sqrt(10000) * 5)
+
+    error_term = np.sqrt(np.outer(np.diag(true_beta_hat_var),
+                                  np.diag(true_beta_hat_var)))
+    assert np.all(np.abs(np.cov(beta_hats) - true_beta_hat_var)
+                  < error_term * 5 / np.sqrt(10000))
+
+
+###############################################################################
+###############################################################################
+###############################################################################
 # test CLI
+def check_data_frame(df1, df2):
+    all_good = True
+    for c in df1.columns:
+        try:
+            all_good = all_good and np.allclose(df1[c], df2[c])
+        except TypeError:
+            all_good = all_good and np.all(df1[c] == df2[c])
+    return all_good
+
 
 def test_cli_make_ld_schema():
     if os.path.isfile(correct_path('test_ld_mats_cli.schema')):
@@ -2003,8 +2099,7 @@ def test_cli_check_ld_schema_listvars():
     cli = pd.read_csv(correct_path('test_listvars.tsv'),
                       header=0,
                       delim_whitespace=True)
-    for c in truth.columns:
-        assert np.all(truth[c] == cli[c])
+    assert check_data_frame(truth, cli)
 
     exit_code = subprocess.call([
         'vilma',
@@ -2021,8 +2116,7 @@ def test_cli_check_ld_schema_listvars():
     cli = pd.read_csv(correct_path('listvars_check_test_ld_mats.tsv'),
                       header=0,
                       delim_whitespace=True)
-    for c in truth.columns:
-        assert np.all(truth[c] == cli[c])
+    assert check_data_frame(truth, cli)
 
 
 def test_cli_check_ld_schema_trace():
@@ -2040,11 +2134,7 @@ def test_cli_check_ld_schema_trace():
     cli = pd.read_csv(correct_path('trace_check_test_ld_mats.tsv'),
                       header=0,
                       delim_whitespace=True)
-    for c in truth.columns:
-        if type(truth[c].iloc[0]) == float:
-            assert np.allclose(truth[c], cli[c])
-        else:
-            assert np.all(truth[c] == cli[c])
+    assert check_data_frame(truth, cli)
 
     exit_code = subprocess.call([
         'vilma',
@@ -2064,11 +2154,7 @@ def test_cli_check_ld_schema_trace():
     cli = pd.read_csv(correct_path('trace_check_test2_ld_mats.tsv'),
                       header=0,
                       delim_whitespace=True)
-    for c in truth.columns:
-        if type(truth[c].iloc[0]) == float:
-            assert np.allclose(truth[c], cli[c])
-        else:
-            assert np.all(truth[c] == cli[c])
+    assert check_data_frame(truth, cli)
 
 
 def test_cli_fit():
@@ -2107,9 +2193,53 @@ def test_cli_fit():
     cli = pd.read_csv(correct_path('vilma_run.estimates.tsv'),
                       sep='\t',
                       header=0)
+    assert check_data_frame(truth, cli)
 
-    for c in truth.columns:
-        if type(truth[c].iloc[0]) == float:
-            assert np.allclose(truth[c], cli[c])
-        else:
-            assert np.all(truth[c] == cli[c])
+
+def test_cli_sim():
+    exit_code = subprocess.call([
+        'vilma',
+        'sim',
+        '--ld-schema', correct_path('ld_manifest.tsv'),
+        '--sumstats', correct_path('good_sumstats_beta.tsv'),
+        '--annotations', correct_path('good_annotations.tsv'),
+        '--covariance', correct_path('copy_vilma_run.covariance.pkl'),
+        '--weights', correct_path('sim_weights.npy'),
+        '--output', correct_path('vilma_sim_run'),
+        '--names', 'simpop1',
+        '--seed', '143'
+    ])
+
+    assert exit_code == 0
+    truth = pd.read_csv(
+        correct_path('copy_vilma_sim_run.simpop1.simgwas.tsv'),
+        sep='\t',
+        header=0
+    )
+    cli = pd.read_csv(
+        correct_path('vilma_sim_run.simpop1.simgwas.tsv'),
+        sep='\t',
+        header=0
+    )
+    assert check_data_frame(truth, cli)
+
+    exit_code = subprocess.call([
+        'vilma',
+        'sim',
+        '--ld-schema', correct_path('ld_manifest.tsv'),
+        '--sumstats', correct_path('good_sumstats_beta.tsv'),
+        '--annotations', correct_path('good_annotations.tsv'),
+        '--covariance', correct_path('copy_vilma_run.covariance.pkl'),
+        '--weights', correct_path('sim_weights.npz'),
+        '--output', correct_path('vilma_sim_run_npz'),
+        '--names', 'simpop1',
+        '--seed', '143'
+    ])
+
+    assert exit_code == 0
+    cli = pd.read_csv(
+        correct_path('vilma_sim_run_npz.simpop1.simgwas.tsv'),
+        sep='\t',
+        header=0
+    )
+    assert check_data_frame(truth, cli)

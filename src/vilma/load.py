@@ -19,9 +19,9 @@ from vilma.matrix_structures import BlockDiagonalMatrix
 
 def load_variant_list(variant_filename):
     """Read in a list of variants from `variant_filename`"""
-    variants = pd.read_csv(variant_filename,
-                           header=0,
-                           delim_whitespace=True).drop_duplicates()
+    variants = pd.read_csv(
+        variant_filename, header=0, delim_whitespace=True
+    ).drop_duplicates(ignore_index=True)
     if 'ID' not in variants.columns:
         raise ValueError('Variant file must contain a column labeled ID')
     if 'A1' not in variants.columns:
@@ -55,7 +55,8 @@ def load_annotations(annotations_filename, variants):
 
     dframe = pd.merge(variants, dframe, on='ID', how='left')
     dframe = pd.DataFrame(dframe['ANNOTATION'])
-    logging.warning('%d out of %d total variants are missing annotations',
+    logging.warning('%d out of %d total variants are missing annotations'
+                    'these will get set to having the first annotation!',
                     dframe['ANNOTATION'].isna().sum(),
                     dframe.shape[0])
 

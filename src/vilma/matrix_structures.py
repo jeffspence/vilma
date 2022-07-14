@@ -66,7 +66,7 @@ class LowRankMatrix():
             a vector.  M.inverse_dot(i) is inverse(M) @ v
         diag: Computes the diagonal entries of the matrix and returns them as a
             numpy array.
-        __pow__: Computes the matrix power of the matrix.
+        matrix_power: Computes the matrix power of the matrix.
         get_rank: Returns the rank of the matrix
     """
     def __init__(self, X=None, t=1.0, u=None, s=None, v=None, D=None,
@@ -110,7 +110,7 @@ class LowRankMatrix():
                     or (D is None)):
                 raise ValueError('Need to provide either a matrix or '
                                  'an SVD decomposition')
-            keep = s >= 1 - np.sqrt(t)
+            keep = np.where(s >= 1 - np.sqrt(t))[0]
             u = u[:, keep]
             s = s[keep]
             v = v[keep, :]
@@ -202,7 +202,7 @@ class LowRankMatrix():
                               self.v[:]) + self.D
         return to_return
 
-    def __pow__(self, power):
+    def matrix_power(self, power):
         """Return the matrix power of this matrix as a LowRankMatrix"""
         if not np.allclose(self.D, 0):
             raise NotImplementedError('Matrix powers where the diagonal '
@@ -268,7 +268,7 @@ class BlockDiagonalMatrix():
             inverse of the matrix dotted with v. If r is a scalar, then it is
             treated as r * np.ones(len(v)). In particular this method computes
             inverse(M + diag(r)) @ v
-        __pow__: Returns the matrix power of the matrix
+        matrix_power: Returns the matrix power of the matrix
         inverse: Returns the pseudoinverse of the matrix
         diag: Returns the diagonal of the matrix
         get_rank: Returns the rank of the matrix
@@ -407,11 +407,13 @@ class BlockDiagonalMatrix():
         parts.append(np.zeros(missing_shape))
         return np.concatenate(parts, axis=0)[self.inv_perm]
 
-    def __pow__(self, power):
+    def matrix_power(self, power):
         """Compute the matrix power of this matrix"""
-        return BlockDiagonalMatrix([x**power for x in self.matrices],
-                                   inverse=self._inverted,
-                                   missing=self.missing)
+        return BlockDiagonalMatrix(
+            [x.matrix_power(power) for x in self.matrices],
+            inverse=self._inverted,
+            missing=self.missing
+        )
 
     @property
     def inverse(self):
