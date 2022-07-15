@@ -55,10 +55,11 @@ def load_annotations(annotations_filename, variants):
 
     dframe = pd.merge(variants, dframe, on='ID', how='left')
     dframe = pd.DataFrame(dframe['ANNOTATION'])
-    logging.warning('%d out of %d total variants are missing annotations'
-                    'these will get set to having the first annotation!',
-                    dframe['ANNOTATION'].isna().sum(),
-                    dframe.shape[0])
+    if dframe['ANNOTATION'].isna().sum() > 0:
+        logging.warning('%d out of %d total variants are missing annotations. '
+                        'These will get set to having the first annotation!',
+                        dframe['ANNOTATION'].isna().sum(),
+                        dframe.shape[0])
 
     denylist = np.where(dframe['ANNOTATION'].isna())[0].tolist()
     dframe.loc[dframe['ANNOTATION'].isna(), 'ANNOTATION'] = 0
