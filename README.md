@@ -406,7 +406,7 @@ from HapMapIII, as well as approximately 6M SNPs that are well-imputed in
 the UK Biobank.
 
 The SNP IDs in these matrices are in the format "chr:pos_ref_alt", for example,
-10:100479326_G_A .
+10:100479326_G_A and are based on hg19 (GRCh37 coordinates). 
 
 You can check which variants are present in these matrices 
 using `vilma check_ld_schema` as described
