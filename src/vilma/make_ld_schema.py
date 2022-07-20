@@ -165,8 +165,9 @@ def main(args):
             logging.info('...reading data')
             fname = line.strip()
             if fname[0] != '/':
+                sep_char = '/' if '/' in args.plink_file_list else ''
                 fname = ('/'.join(args.plink_file_list.split('/')[:-1])
-                         + '/' + fname)
+                         + sep_char + fname)
             plink_data = plinkio.plinkfile.open(
                 fname
             )
