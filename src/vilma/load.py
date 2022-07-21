@@ -10,6 +10,7 @@ functions:
 """
 import logging
 from tempfile import TemporaryFile
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import h5py
@@ -69,35 +70,52 @@ def load_annotations(annotations_filename, variants):
 
 def load_sumstats(sumstats_filename, variants):
     """Load summary stats from `sumstats_filename` and match to `variants`"""
-    sumstats = pd.read_csv(sumstats_filename,
-                           header=0,
-                           delim_whitespace=True)
-
-    if 'ID' not in sumstats.columns:
+    header = pd.read_csv(sumstats_filename,
+                         nrows=1,
+                         header=0,
+                         delim_whitespace=True)
+    if 'ID' not in header.columns:
         raise ValueError('Summary Statistics File must contain a column '
                          'labeled ID')
-
-    if 'A1' not in sumstats.columns:
+    if 'A1' not in header.columns:
         raise ValueError('Summary Statistics File must contain a column '
                          'labeled A1')
-
-    if 'A2' not in sumstats.columns:
-        if 'REF' not in sumstats.columns or 'ALT' not in sumstats.columns:
+    a2_cols = ['A2']
+    if 'A2' not in header.columns:
+        a2_cols = ['REF', 'ALT']
+        if 'REF' not in header.columns or 'ALT' not in header.columns:
             raise ValueError('If summary statistics file does not contain '
                              'a column labeled A2, then it must contain REF '
                              'and ALT columns.')
+    if 'SE' not in header.columns:
+        raise ValueError('Summary Statistics File must contain a column '
+                         'labeled SE')
+
+    effect_col = 'BETA'
+    if 'BETA' not in header.columns:
+        effect_col = 'OR'
+        if 'OR' not in header.columns:
+            raise ValueError('Summary stat file needs to contain either'
+                             'BETA or OR filed.')
+
+    indices = pd.read_csv(sumstats_filename,
+                          header=0,
+                          delim_whitespace=True,
+                          usecols=['ID'])
+    toss = np.where(~indices.ID.isin(variants.ID))[0]
+    toss = [t+1 for t in toss]
+    sumstats = pd.read_csv(sumstats_filename,
+                           header=0,
+                           delim_whitespace=True,
+                           usecols=['ID', 'A1', 'SE', effect_col] + a2_cols,
+                           skiprows=toss)
+
+    if 'A2' not in sumstats.columns:
         sumstats['A2'] = sumstats['REF'].copy()
         flip = sumstats['A1'] == sumstats['REF']
         sumstats.loc[flip, 'A2'] = sumstats.loc[flip, 'ALT'].copy()
 
-    if 'SE' not in sumstats.columns:
-        raise ValueError('Summary Statistics File must contain a column '
-                         'labeled SE')
-
     if 'BETA' not in sumstats.columns:
-        if 'OR' not in sumstats.columns:
-            raise ValueError('Summary stat file needs to contain either'
-                             'BETA or OR filed.')
         sumstats['BETA'] = np.log(sumstats.OR)
 
     sumstats = pd.merge(variants, sumstats, on='ID', how='left')
@@ -136,16 +154,12 @@ def schema_iterator(schema_path):
         and the second is the path (str) to a .npy file, which together specify
         an LD matrix on a set of variants.
     """
-
+    schema_path = Path(schema_path)
     with open(schema_path, 'r') as schema:
-        sep_char = '/' if '/' in schema_path else ''
         for line in schema:
             snp_path, ld_path = line.split()
-            if snp_path[0] != '/':
-                snp_path = ('/'.join(schema_path.split('/')[:-1])
-                            + sep_char + snp_path)
-                ld_path = ('/'.join(schema_path.split('/')[:-1])
-                           + sep_char + ld_path)
+            snp_path = Path(schema_path.parents[0], snp_path)
+            ld_path = Path(schema_path.parents[0], ld_path)
             yield snp_path, ld_path
 
 

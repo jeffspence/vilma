@@ -4,6 +4,7 @@ Utilities for building a block LD matrix from genotype data
 import os
 import logging
 import plinkio.plinkfile
+from pathlib import Path
 import numpy as np
 import pandas as pd
 from vilma import matrix_structures
@@ -89,7 +90,7 @@ def _process_blocks(blocked_data, outfile_name, ldthresh=-1):
                       + (rel_outpath + '.npy').format(*key.split()))
 
     with open(outfile_name + '.schema', 'a') as ofh:
-        ofh.write('\n'.join(legend))
+        ofh.write('\n'.join(legend) + '\n')
 
 
 def _assign_to_blocks(blocks, plink_data, variants=None):
@@ -159,17 +160,14 @@ def main(args):
         raise ValueError(args.out_root + '.schema already exists. '
                          'Please delete before running.')
 
-    with open(args.plink_file_list, 'r') as plink_manifest:
+    plink_path = Path(args.plink_file_list)
+    with open(plink_path, 'r') as plink_manifest:
         for idx, line in enumerate(plink_manifest):
             logging.info('Working on plink file %d', idx + 1)
             logging.info('...reading data')
-            fname = line.strip()
-            if fname[0] != '/':
-                sep_char = '/' if '/' in args.plink_file_list else ''
-                fname = ('/'.join(args.plink_file_list.split('/')[:-1])
-                         + sep_char + fname)
+            fname = Path(plink_path.parents[0], line.strip())
             plink_data = plinkio.plinkfile.open(
-                fname
+                str(fname)
             )
             logging.info('...assigning SNPs to blocks')
             blocked_data = _assign_to_blocks(ld_blocks, plink_data, variants)
