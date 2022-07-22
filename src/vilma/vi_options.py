@@ -3,7 +3,6 @@ import logging
 import itertools
 import pickle
 import numpy as np
-from vilma.variational_inference import MultiPopVI
 from vilma import load
 
 
@@ -238,6 +237,7 @@ def main(args):
     if args.trait:
         raise NotImplementedError('--trait has not been implemented yet.')
     else:
+        from vilma.variational_inference import MultiPopVI
         elbo = MultiPopVI(
             marginal_effects=betas,
             std_errs=std_errs,

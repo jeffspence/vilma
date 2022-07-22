@@ -192,6 +192,9 @@ def load_ld_mat(ld_path, variant_indices=None, mismatch=None, signs=None):
         raise ValueError('signs must be a vector consisting entirely of '
                          '+1s and -1s.')
 
+    if len(ld_matrix.shape) == 0:
+        return ld_matrix[None, None]
+
     num_snps = ld_matrix.shape[0]
     if ld_matrix.shape[0] > ld_matrix.shape[1]:
         num_snps -= 1
@@ -202,9 +205,6 @@ def load_ld_mat(ld_path, variant_indices=None, mismatch=None, signs=None):
         mismatch = np.zeros(variant_indices.sum(), dtype=bool)
     if signs is None:
         signs = np.ones(num_snps)
-
-    if len(ld_matrix.shape) == 0:
-        return ld_matrix[None, None]
 
     # square matrix implies that this is a real LD matrix
     if ld_matrix.shape[0] == ld_matrix.shape[1]:
