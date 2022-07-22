@@ -119,13 +119,17 @@ def _assign_to_blocks(blocks, plink_data, variants=None):
         if locus.bp_position > blocks[chromosome].end[block_idx]:
             continue
 
+        these_genos = np.array([[e if e <= 2.1 else np.nan for e in row]])
+        # Treat monomorphic data as missing
+        if np.nanstd(these_genos) == 0:
+            continue
+
         key_str = '{} {}'.format(chromosome, block_idx)
         if key_str not in blocked_data:
             blocked_data[key_str] = []
             blocked_ids[key_str] = []
-        blocked_data[key_str].append(
-            np.array([[e if e <= 2.1 else np.nan for e in row]])
-        )
+
+        blocked_data[key_str].append(these_genos)
         blocked_ids[key_str].append(
             [locus.name, chromosome, locus.bp_position,
              locus.position, locus.allele1, locus.allele2]
