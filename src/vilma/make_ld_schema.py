@@ -121,7 +121,7 @@ def _assign_to_blocks(blocks, plink_data, variants=None):
 
         these_genos = np.array([[e if e <= 2.1 else np.nan for e in row]])
         # Treat monomorphic data as missing
-        if np.nanstd(these_genos) == 0:
+        if np.all(np.isnan(these_genos)) or np.nanstd(these_genos) == 0:
             continue
 
         key_str = '{} {}'.format(chromosome, block_idx)
