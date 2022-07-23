@@ -20,8 +20,8 @@ REL_TOL = 1e-6      # relative change convergence criterion for optimization
 ABS_TOL = 1e-6      # absolute change convergence criterion for optimization
 ELBO_TOL = 0.1      # ELBo change convergence criterion for optimization
 EM_TOL = 10         # ELBo change threshold for updating error scaling
-MAX_GRAD = 100      # Truncate gradient coordinates larger than MAX_GRAD
 ELBO_MOMENTUM = 0.5     # Smoothing parameter for assessing ELBo changes
+MAX_NUM_ITERS = 20  # maximum number of inner iterations per optimization step
 
 
 class VIScheme():
@@ -426,7 +426,7 @@ class VIScheme():
         new_elbo_delta = 0
         for idx, update in enumerate(updates):
             orig_obj = None
-            while True:
+            for update_iter in range(MAX_NUM_ITERS):
                 L[idx] = max([1., L[idx] / 1.25])
                 logging.info('...Updating paramset %d, L=%f', idx, L[idx])
                 params, L, orig_obj, new_obj = update(*params, orig_obj,
