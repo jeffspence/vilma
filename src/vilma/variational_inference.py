@@ -406,7 +406,7 @@ class VIScheme():
         if running_elbo_delta is None:
             running_elbo_delta = elbo_change
         running_elbo_delta *= ELBO_MOMENTUM
-        running_elbo_delta += (1 - ELBO_MOMENTUM) * elbo_change
+        running_elbo_delta += (1 - ELBO_MOMENTUM) * np.maximum(elbo_change, 0)
         return new_params, L_new, elbo, running_elbo_delta
 
     def elbo(self, params):
