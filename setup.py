@@ -16,7 +16,7 @@ setuptools.setup(
                       'plinkio>=0.9.8',
                       'pandas>=1.2.1',
                       'h5py>=3.6.0',
-                      'numba>=0.53.1'],
+                      'numba==0.55.2'],
     entry_points={
         'console_scripts': ['vilma = vilma.frontend:main'],
     },

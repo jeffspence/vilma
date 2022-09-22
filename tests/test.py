@@ -24,6 +24,7 @@ def correct_path(fname):
 ###############################################################################
 # test matrix_structures.py
 
+
 def test_svd_threshold():
     x = np.random.random((5, 5))
     x = x + x.T + 3 * np.eye(5)
