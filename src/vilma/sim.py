@@ -226,7 +226,7 @@ def main(args):
         keep_bool = np.ones(all_vars.shape[0], dtype=bool)
         keep_bool[missing] = False
         keep_bool[this_missing_ld] = False
-        std_errs[idx, keep_bool] = (np.sqrt(n_scale)
+        std_errs[idx, keep_bool] = (np.sqrt(1/n_scale)
                                     * these_sstats.SE.loc[keep_bool])
 
     # Load covariances
